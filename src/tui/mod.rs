@@ -12,6 +12,18 @@ use ratatui::Terminal;
 use std::io;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
+use uuid::Uuid;
+
+/// Different modes the TUI can be in
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TuiMode {
+    Normal,
+    Edit,
+    Reply,
+    Search,
+    Thread,
+    Pinned,
+}
 
 /// TUI Application state
 pub struct TuiApp {
@@ -22,6 +34,14 @@ pub struct TuiApp {
     pub should_quit: bool,
     pub selected_contact: usize,
     pub contacts: Vec<String>,
+    pub mode: TuiMode,
+    pub selected_message: Option<usize>,
+    pub search_query: String,
+    pub search_results: Vec<usize>,
+    pub thread_parent_id: Option<Uuid>,
+    pub pinned_messages: Vec<Message>,
+    pub editing_message_id: Option<Uuid>,
+    pub replying_to_id: Option<Uuid>,
 }
 
 impl TuiApp {
@@ -34,6 +54,14 @@ impl TuiApp {
             should_quit: false,
             selected_contact: 0,
             contacts: vec!["General".to_string()],
+            mode: TuiMode::Normal,
+            selected_message: None,
+            search_query: String::new(),
+            search_results: Vec::new(),
+            thread_parent_id: None,
+            pinned_messages: Vec::new(),
+            editing_message_id: None,
+            replying_to_id: None,
         }
     }
 
@@ -52,6 +80,12 @@ impl TuiApp {
         // Create messaging service
         let messaging = MessagingService::new();
         let mut event_rx = messaging.event_rx;
+
+        // Set current user for mention detection
+        {
+            let state_guard = self.state.read().await;
+            self.notification_service.set_current_user(&state_guard.identity.name);
+        }
 
         // Main loop
         let mut tick = interval(Duration::from_millis(250));
@@ -108,43 +142,263 @@ impl TuiApp {
             if key.kind != KeyEventKind::Press {
                 return Ok(());
             }
-            match key.code {
-                KeyCode::Char('q') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-                    self.should_quit = true;
-                }
-                KeyCode::Esc => {
-                    self.should_quit = true;
-                }
-                KeyCode::Enter => {
-                    self.send_message().await?;
-                }
-                KeyCode::Char(c) => {
-                    self.input.push(c);
-                }
-                KeyCode::Backspace => {
-                    self.input.pop();
-                }
-                KeyCode::Up => {
-                    if self.selected_contact > 0 {
-                        self.selected_contact -= 1;
-                    }
-                }
-                KeyCode::Down => {
-                    if self.selected_contact + 1 < self.contacts.len() {
-                        self.selected_contact += 1;
-                    }
-                }
-                _ => {}
+            
+            match self.mode {
+                TuiMode::Normal => self.handle_normal_input(key).await?,
+                TuiMode::Edit => self.handle_edit_input(key).await?,
+                TuiMode::Reply => self.handle_reply_input(key).await?,
+                TuiMode::Search => self.handle_search_input(key).await?,
+                TuiMode::Thread => self.handle_thread_input(key).await?,
+                TuiMode::Pinned => self.handle_pinned_input(key).await?,
             }
         }
         Ok(())
     }
 
+    async fn handle_normal_input(&mut self, key: crossterm::event::KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Char('q') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                self.should_quit = true;
+            }
+            KeyCode::Esc => {
+                self.should_quit = true;
+            }
+            KeyCode::Enter => {
+                self.send_message().await?;
+            }
+            KeyCode::Char('e') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                if !self.messages.is_empty() {
+                    self.mode = TuiMode::Edit;
+                    self.selected_message = Some(self.messages.len().saturating_sub(1));
+                    self.editing_message_id = self.selected_message.and_then(|i| self.messages.get(i).map(|m| m.id));
+                    if let Some(id) = self.editing_message_id {
+                        if let Some(msg) = self.messages.iter().find(|m| m.id == id) {
+                            self.input = msg.content.clone();
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('r') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                if !self.messages.is_empty() {
+                    self.mode = TuiMode::Reply;
+                    self.selected_message = Some(self.messages.len().saturating_sub(1));
+                    self.replying_to_id = self.selected_message.and_then(|i| self.messages.get(i).map(|m| m.id));
+                    self.input.clear();
+                }
+            }
+            KeyCode::Char('f') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                self.mode = TuiMode::Search;
+                self.search_query.clear();
+                self.search_results.clear();
+                self.input.clear();
+            }
+            KeyCode::Char('p') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                if !self.messages.is_empty() {
+                    let idx = self.messages.len().saturating_sub(1);
+                    if let Some(msg) = self.messages.get(idx) {
+                        let id = msg.id;
+                        let _ = self.toggle_pin(id).await;
+                    }
+                }
+            }
+            KeyCode::Char('d') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                if !self.messages.is_empty() {
+                    let idx = self.messages.len().saturating_sub(1);
+                    if let Some(msg) = self.messages.get(idx) {
+                        let id = msg.id;
+                        let _ = self.delete_message(id).await;
+                    }
+                }
+            }
+            KeyCode::Char('t') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                if !self.messages.is_empty() {
+                    let idx = self.messages.len().saturating_sub(1);
+                    if let Some(msg) = self.messages.get(idx) {
+                        self.thread_parent_id = Some(msg.id);
+                        self.mode = TuiMode::Thread;
+                    }
+                }
+            }
+            KeyCode::Char('v') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                self.pinned_messages = self.messages.iter().filter(|m| m.pinned).cloned().collect();
+                if !self.pinned_messages.is_empty() {
+                    self.mode = TuiMode::Pinned;
+                }
+            }
+            KeyCode::Up => {
+                if self.selected_contact > 0 {
+                    self.selected_contact -= 1;
+                }
+            }
+            KeyCode::Down => {
+                if self.selected_contact + 1 < self.contacts.len() {
+                    self.selected_contact += 1;
+                }
+            }
+            KeyCode::Char(c) => {
+                self.input.push(c);
+            }
+            KeyCode::Backspace => {
+                self.input.pop();
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    async fn handle_edit_input(&mut self, key: crossterm::event::KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Esc => {
+                self.cancel_mode();
+            }
+            KeyCode::Enter => {
+                if let Some(id) = self.editing_message_id {
+                    let new_content = self.input.clone();
+                    if !new_content.is_empty() {
+                        self.edit_message(id, new_content).await?;
+                    }
+                }
+                self.cancel_mode();
+            }
+            KeyCode::Char(c) => {
+                self.input.push(c);
+            }
+            KeyCode::Backspace => {
+                self.input.pop();
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    async fn handle_reply_input(&mut self, key: crossterm::event::KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Esc => {
+                self.cancel_mode();
+            }
+            KeyCode::Enter => {
+                if let Some(parent_id) = self.replying_to_id {
+                    let content = self.input.trim().to_string();
+                    if !content.is_empty() {
+                        self.send_reply(parent_id, &content).await?;
+                    }
+                }
+                self.cancel_mode();
+            }
+            KeyCode::Char(c) => {
+                self.input.push(c);
+            }
+            KeyCode::Backspace => {
+                self.input.pop();
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    async fn handle_search_input(&mut self, key: crossterm::event::KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Esc => {
+                self.cancel_mode();
+            }
+            KeyCode::Enter => {
+                self.search_query = self.input.clone();
+                self.perform_search();
+            }
+            KeyCode::Char(c) => {
+                self.input.push(c);
+            }
+            KeyCode::Backspace => {
+                self.input.pop();
+            }
+            KeyCode::Up => {
+                if let Some(selected) = self.selected_message {
+                    if selected > 0 {
+                        self.selected_message = Some(selected - 1);
+                    }
+                }
+            }
+            KeyCode::Down => {
+                if let Some(selected) = self.selected_message {
+                    if selected + 1 < self.search_results.len() {
+                        self.selected_message = Some(selected + 1);
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    async fn handle_thread_input(&mut self, key: crossterm::event::KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.cancel_mode();
+            }
+            KeyCode::Up => {
+                if let Some(selected) = self.selected_message {
+                    if selected > 0 {
+                        self.selected_message = Some(selected - 1);
+                    }
+                }
+            }
+            KeyCode::Down => {
+                let thread_len = self.get_thread_messages().len();
+                if let Some(selected) = self.selected_message {
+                    if selected + 1 < thread_len {
+                        self.selected_message = Some(selected + 1);
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    async fn handle_pinned_input(&mut self, key: crossterm::event::KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.cancel_mode();
+            }
+            KeyCode::Up => {
+                if let Some(selected) = self.selected_message {
+                    if selected > 0 {
+                        self.selected_message = Some(selected - 1);
+                    }
+                }
+            }
+            KeyCode::Down => {
+                if let Some(selected) = self.selected_message {
+                    if selected + 1 < self.pinned_messages.len() {
+                        self.selected_message = Some(selected + 1);
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn cancel_mode(&mut self) {
+        self.mode = TuiMode::Normal;
+        self.selected_message = None;
+        self.thread_parent_id = None;
+        self.editing_message_id = None;
+        self.replying_to_id = None;
+        self.input.clear();
+    }
+
     async fn handle_message_event(&mut self, event: MessageEvent) -> Result<()> {
         match event {
             MessageEvent::MessageReceived(msg) => {
-                self.notification_service
-                    .notify_message(&msg.sender, &msg.content)?;
+                // Check if message mentions current user
+                if self.notification_service.is_mentioned(&msg.mentions) {
+                    self.notification_service
+                        .notify_mention(&msg.sender, &msg.content)?;
+                } else {
+                    self.notification_service
+                        .notify_message(&msg.sender, &msg.content)?;
+                }
                 self.messages.push(msg);
             }
             MessageEvent::DeliveryConfirmed(conf) => {
@@ -153,8 +407,38 @@ impl TuiApp {
                 }
             }
             MessageEvent::QueueUpdated { count } => {
-                // Could show queue status in UI
                 let _ = count;
+            }
+            MessageEvent::MessageEdited { message_id, new_content } => {
+                if let Some(msg) = self.messages.iter_mut().find(|m| m.id == message_id) {
+                    msg.edit(new_content);
+                }
+            }
+            MessageEvent::MessageDeleted { message_id } => {
+                if let Some(msg) = self.messages.iter_mut().find(|m| m.id == message_id) {
+                    msg.mark_deleted();
+                }
+            }
+            MessageEvent::MessagePinned { message_id, pinned_by } => {
+                if let Some(msg) = self.messages.iter_mut().find(|m| m.id == message_id) {
+                    msg.pin(pinned_by);
+                }
+                self.pinned_messages = self.messages.iter().filter(|m| m.pinned).cloned().collect();
+            }
+            MessageEvent::MessageUnpinned { message_id } => {
+                if let Some(msg) = self.messages.iter_mut().find(|m| m.id == message_id) {
+                    msg.unpin();
+                }
+                self.pinned_messages = self.messages.iter().filter(|m| m.pinned).cloned().collect();
+            }
+            MessageEvent::MentionReceived { message, mentioned_user } => {
+                let _ = mentioned_user;
+                // Only notify if not already notified by MessageReceived
+                if !self.messages.iter().any(|m| m.id == message.id) {
+                    self.notification_service
+                        .notify_mention(&message.sender, &message.content)?;
+                    self.messages.push(message);
+                }
             }
         }
         Ok(())
@@ -177,12 +461,96 @@ impl TuiApp {
         self.messages.push(msg.clone());
         self.input.clear();
 
-        // In a real implementation, this would send over Reticulum
-        // For now, we just add it to the local message list
         Ok(())
     }
 
+    async fn send_reply(&mut self, parent_id: Uuid, content: &str) -> Result<()> {
+        let state = self.state.read().await;
+        let msg = Message::new(
+            state.identity.name.clone(),
+            self.contacts[self.selected_contact].clone(),
+            content,
+        ).with_parent(parent_id);
+        drop(state);
+
+        self.messages.push(msg.clone());
+        Ok(())
+    }
+
+    async fn edit_message(&mut self, message_id: Uuid, new_content: String) -> Result<()> {
+        if let Some(msg) = self.messages.iter_mut().find(|m| m.id == message_id) {
+            msg.edit(new_content);
+        }
+        Ok(())
+    }
+
+    async fn delete_message(&mut self, message_id: Uuid) -> Result<()> {
+        if let Some(msg) = self.messages.iter_mut().find(|m| m.id == message_id) {
+            msg.mark_deleted();
+        }
+        Ok(())
+    }
+
+    async fn toggle_pin(&mut self, message_id: Uuid) -> Result<()> {
+        if let Some(msg) = self.messages.iter_mut().find(|m| m.id == message_id) {
+            if msg.pinned {
+                msg.unpin();
+            } else {
+                let state = self.state.read().await;
+                msg.pin(&state.identity.name);
+                drop(state);
+            }
+        }
+        self.pinned_messages = self.messages.iter().filter(|m| m.pinned).cloned().collect();
+        Ok(())
+    }
+
+    fn perform_search(&mut self) {
+        let query = self.search_query.to_lowercase();
+        self.search_results = self.messages
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| !m.deleted && m.content.to_lowercase().contains(&query))
+            .map(|(i, _)| i)
+            .collect();
+        self.selected_message = if self.search_results.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+    }
+
+    fn get_thread_messages(&self) -> Vec<&Message> {
+        if let Some(parent_id) = self.thread_parent_id {
+            let mut thread = vec![];
+            // Add parent message first
+            if let Some(parent) = self.messages.iter().find(|m| m.id == parent_id) {
+                thread.push(parent);
+            }
+            // Add all replies
+            for msg in &self.messages {
+                if msg.parent_id == Some(parent_id) {
+                    thread.push(msg);
+                }
+            }
+            thread
+        } else {
+            Vec::new()
+        }
+    }
+
     fn draw(&self, frame: &mut ratatui::Frame) {
+        match self.mode {
+            TuiMode::Normal => self.draw_normal(frame),
+            TuiMode::Edit => self.draw_edit(frame),
+            TuiMode::Reply => self.draw_reply(frame),
+            TuiMode::Search => self.draw_search(frame),
+            TuiMode::Thread => self.draw_thread(frame),
+            TuiMode::Pinned => self.draw_pinned(frame),
+        }
+    }
+
+    fn draw_normal(&self, frame: &mut ratatui::Frame) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(20), Constraint::Percentage(80)])
@@ -217,31 +585,24 @@ impl TuiApp {
             .constraints([Constraint::Min(3), Constraint::Length(3)])
             .split(chunks[1]);
 
+        // Pinned messages indicator
+        let pinned_count = self.messages.iter().filter(|m| m.pinned).count();
+        let title = if pinned_count > 0 {
+            format!("Chat - {} ({} pinned, Ctrl+V to view | Ctrl+Q to quit)", 
+                self.contacts[self.selected_contact], pinned_count)
+        } else {
+            format!("Chat - {} (Ctrl+Q to quit)", self.contacts[self.selected_contact])
+        };
+
         // Messages
         let messages_block = Block::default()
-            .title(format!(
-                "Chat - {} (Ctrl+Q to quit)",
-                self.contacts[self.selected_contact]
-            ))
+            .title(title)
             .borders(Borders::ALL);
         let messages_text = Text::from(
             self.messages
                 .iter()
-                .map(|m| {
-                    Line::from(vec![
-                        Span::styled(
-                            format!("[{}] ", m.timestamp.format("%H:%M")),
-                            Style::default().fg(Color::Gray),
-                        ),
-                        Span::styled(
-                            format!("{}: ", m.sender),
-                            Style::default()
-                                .fg(Color::Cyan)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::raw(&m.content),
-                    ])
-                })
+                .enumerate()
+                .map(|(i, m)| self.format_message_line(m, i))
                 .collect::<Vec<_>>(),
         );
         let messages_paragraph = Paragraph::new(messages_text)
@@ -250,8 +611,179 @@ impl TuiApp {
         frame.render_widget(messages_paragraph, main_chunks[0]);
 
         // Input
-        let input_block = Block::default().title("Message").borders(Borders::ALL);
+        let input_block = Block::default().title("Message (Ctrl+E=Edit Ctrl+R=Reply Ctrl+F=Search Ctrl+P=Pin Ctrl+D=Del Ctrl+T=Thread)").borders(Borders::ALL);
         let input_paragraph = Paragraph::new(self.input.as_str()).block(input_block);
         frame.render_widget(input_paragraph, main_chunks[1]);
+    }
+
+    fn format_message_line<'a>(&self, msg: &'a Message, _index: usize) -> Line<'a> {
+        let mut spans = vec![
+            Span::styled(
+                format!("[{}] ", msg.timestamp.format("%H:%M")),
+                Style::default().fg(Color::Gray),
+            ),
+        ];
+
+        if msg.pinned {
+            spans.push(Span::styled("📌 ", Style::default().fg(Color::Yellow)));
+        }
+
+        if msg.deleted {
+            spans.push(Span::styled(
+                "[deleted]".to_string(),
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+            ));
+        } else {
+            spans.push(Span::styled(
+                format!("{}: ", msg.sender),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ));
+
+            if msg.parent_id.is_some() {
+                spans.push(Span::styled(
+                    "↳ ",
+                    Style::default().fg(Color::Magenta),
+                ));
+            }
+
+            spans.push(Span::raw(&msg.content));
+
+            if msg.edited_at.is_some() {
+                spans.push(Span::styled(
+                    " (edited)",
+                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+                ));
+            }
+        }
+
+        Line::from(spans)
+    }
+
+    fn draw_edit(&self, frame: &mut ratatui::Frame) {
+        let area = frame.area();
+        let block = Block::default()
+            .title("Edit Message (Enter=Save Esc=Cancel)")
+            .borders(Borders::ALL);
+        let paragraph = Paragraph::new(self.input.as_str()).block(block);
+        frame.render_widget(paragraph, area);
+    }
+
+    fn draw_reply(&self, frame: &mut ratatui::Frame) {
+        let area = frame.area();
+        let block = Block::default()
+            .title("Reply to Message (Enter=Send Esc=Cancel)")
+            .borders(Borders::ALL);
+        let paragraph = Paragraph::new(self.input.as_str()).block(block);
+        frame.render_widget(paragraph, area);
+    }
+
+    fn draw_search(&self, frame: &mut ratatui::Frame) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(3)])
+            .split(frame.area());
+
+        // Search input
+        let input_block = Block::default()
+            .title("Search (Enter=Search Esc=Cancel)")
+            .borders(Borders::ALL);
+        let input_paragraph = Paragraph::new(self.input.as_str()).block(input_block);
+        frame.render_widget(input_paragraph, chunks[0]);
+
+        // Results
+        let results_block = Block::default()
+            .title(format!("Results: {} matches", self.search_results.len()))
+            .borders(Borders::ALL);
+        
+        let results_text = if self.search_results.is_empty() && !self.search_query.is_empty() {
+            Text::from("No results found.")
+        } else {
+            Text::from(
+                self.search_results
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &msg_idx)| {
+                        if let Some(msg) = self.messages.get(msg_idx) {
+                            let style = if self.selected_message == Some(i) {
+                                Style::default().fg(Color::Black).bg(Color::White)
+                            } else {
+                                Style::default()
+                            };
+                            Line::from(vec![
+                                Span::styled(format!("[{}] ", msg.timestamp.format("%Y-%m-%d %H:%M")), Style::default().fg(Color::Gray)),
+                                Span::styled(format!("{}: ", msg.sender), Style::default().fg(Color::Cyan)),
+                                Span::raw(&msg.content),
+                            ]).style(style)
+                        } else {
+                            Line::from("")
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let results_paragraph = Paragraph::new(results_text).block(results_block);
+        frame.render_widget(results_paragraph, chunks[1]);
+    }
+
+    fn draw_thread(&self, frame: &mut ratatui::Frame) {
+        let area = frame.area();
+        let thread_messages = self.get_thread_messages();
+        
+        let block = Block::default()
+            .title("Thread View (Esc/Q=Back)")
+            .borders(Borders::ALL);
+        
+        let text = Text::from(
+            thread_messages
+                .iter()
+                .enumerate()
+                .map(|(i, m)| {
+                    let style = if self.selected_message == Some(i) {
+                        Style::default().fg(Color::Black).bg(Color::White)
+                    } else {
+                        Style::default()
+                    };
+                    self.format_message_line(m, i).style(style)
+                })
+                .collect::<Vec<_>>(),
+        );
+        let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: true });
+        frame.render_widget(paragraph, area);
+    }
+
+    fn draw_pinned(&self, frame: &mut ratatui::Frame) {
+        let area = frame.area();
+        
+        let block = Block::default()
+            .title("Pinned Messages (Esc/Q=Back)")
+            .borders(Borders::ALL);
+        
+        let text = if self.pinned_messages.is_empty() {
+            Text::from("No pinned messages.")
+        } else {
+            Text::from(
+                self.pinned_messages
+                    .iter()
+                    .enumerate()
+                    .map(|(i, m)| {
+                        let style = if self.selected_message == Some(i) {
+                            Style::default().fg(Color::Black).bg(Color::White)
+                        } else {
+                            Style::default()
+                        };
+                        Line::from(vec![
+                            Span::styled(format!("[{}] ", m.timestamp.format("%Y-%m-%d %H:%M")), Style::default().fg(Color::Gray)),
+                            Span::styled(format!("{}: ", m.sender), Style::default().fg(Color::Cyan)),
+                            Span::raw(&m.content),
+                            Span::styled(format!(" (pinned by {})", m.pinned_by.as_deref().unwrap_or("unknown")), Style::default().fg(Color::Yellow)),
+                        ]).style(style)
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: true });
+        frame.render_widget(paragraph, area);
     }
 }
