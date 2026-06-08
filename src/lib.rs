@@ -1,3 +1,4 @@
+pub mod crash_reporter;
 pub mod crypto;
 pub mod gui;
 pub mod identity;
@@ -19,6 +20,8 @@ pub struct Config {
     pub reticulum_port: u16,
     pub enable_notifications: bool,
     pub enable_encryption: bool,
+    /// Configuration format version for migration tracking
+    pub version: u32,
 }
 
 impl Default for Config {
@@ -29,8 +32,60 @@ impl Default for Config {
             reticulum_port: 3742,
             enable_notifications: true,
             enable_encryption: true,
+            version: 1,
         }
     }
+}
+
+/// Config migration result indicating what changed
+#[derive(Debug, Clone)]
+pub struct MigrationResult {
+    pub from_version: u32,
+    pub to_version: u32,
+    pub changes: Vec<String>,
+    pub backup_path: Option<String>,
+}
+
+impl MigrationResult {
+    pub fn new(from: u32, to: u32) -> Self {
+        Self {
+            from_version: from,
+            to_version: to,
+            changes: Vec::new(),
+            backup_path: None,
+        }
+    }
+
+    pub fn with_change(mut self, change: impl Into<String>) -> Self {
+        self.changes.push(change.into());
+        self
+    }
+
+    pub fn with_backup(mut self, path: impl Into<String>) -> Self {
+        self.backup_path = Some(path.into());
+        self
+    }
+
+    pub fn is_noop(&self) -> bool {
+        self.from_version == self.to_version
+    }
+}
+
+/// Migrate a config from an older version to the current version
+pub fn migrate_config(mut config: Config) -> anyhow::Result<(Config, MigrationResult)> {
+    let current_version = 1;
+    let mut result = MigrationResult::new(config.version, current_version);
+
+    if config.version == current_version {
+        return Ok((config, result));
+    }
+
+    if config.version == 0 {
+        result = result.with_change("Added version field (was v0)");
+        config.version = 1;
+    }
+
+    Ok((config, result))
 }
 
 /// Shared application state
