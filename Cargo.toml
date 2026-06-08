@@ -1,6 +1,6 @@
 [package]
 name = "reticulumchat"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 authors = ["ReticulumChat Contributors"]
 description = "A chat client for the Reticulum mesh network"
@@ -25,6 +25,9 @@ egui = { version = "0.29", optional = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 shellexpand = "3.1"
+
+[dev-dependencies]
+tempfile = "3.14"
 
 [features]
 default = ["gui"]
