@@ -2,6 +2,7 @@ pub mod crypto;
 pub mod gui;
 pub mod identity;
 pub mod messaging;
+pub mod network;
 pub mod notification;
 pub mod reticulum;
 pub mod tui;
@@ -40,14 +41,17 @@ pub struct AppState {
     pub config: Config,
     pub identity: identity::Identity,
     pub message_queue: messaging::OfflineQueue,
+    pub network: network::MeshNetwork,
 }
 
 impl AppState {
     pub fn new(config: Config, identity: identity::Identity) -> Self {
+        let local_hash = identity.destination_hash();
         Self {
             config,
             identity,
             message_queue: messaging::OfflineQueue::new(),
+            network: network::MeshNetwork::new(local_hash),
         }
     }
 }

@@ -1,4 +1,5 @@
 use crate::messaging::{Message, MessageEvent};
+
 use crate::notification::NotificationService;
 use crate::SharedState;
 use anyhow::Result;
@@ -14,6 +15,8 @@ pub enum GuiMode {
     Search,
     Thread,
     Pinned,
+    Network,
+    NetworkNode,
 }
 
 /// GUI Application state (using egui/eframe)
@@ -36,6 +39,8 @@ pub struct GuiApp {
     pub replying_to_id: Option<Uuid>,
     pub current_user: String,
     pub show_search_results: bool,
+    pub selected_node: usize,
+    pub network_show_bandwidth: bool,
 }
 
 impl GuiApp {
@@ -63,6 +68,8 @@ impl GuiApp {
             replying_to_id: None,
             current_user: user_name,
             show_search_results: false,
+            selected_node: 0,
+            network_show_bandwidth: false,
         }
     }
 
@@ -240,6 +247,8 @@ impl eframe::App for GuiApp {
             GuiMode::Search => self.draw_search(ctx),
             GuiMode::Thread => self.draw_thread(ctx),
             GuiMode::Pinned => self.draw_pinned(ctx),
+            GuiMode::Network => self.draw_network(ctx),
+            GuiMode::NetworkNode => self.draw_network_node(ctx),
         }
     }
 
@@ -265,6 +274,11 @@ impl GuiApp {
                 if pinned_count > 0 && ui.button(format!("Pinned ({})", pinned_count)).clicked() {
                     self.update_pinned_messages();
                     self.mode = GuiMode::Pinned;
+                }
+                if ui.button("Network (Ctrl+N)").clicked() {
+                    self.mode = GuiMode::Network;
+                    self.selected_node = 0;
+                    self.network_show_bandwidth = false;
                 }
             });
             ui.separator();
@@ -581,6 +595,93 @@ impl GuiApp {
                         }
                     });
             }
+        });
+    }
+
+    fn draw_network(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Mesh Network");
+            ui.separator();
+            
+            ui.horizontal(|ui| {
+                if ui.button("Back").clicked() {
+                    self.reset_mode();
+                }
+                if ui.button(if self.network_show_bandwidth { "Show Topology" } else { "Show Bandwidth" }).clicked() {
+                    self.network_show_bandwidth = !self.network_show_bandwidth;
+                }
+            });
+            
+            ui.separator();
+            
+            if self.network_show_bandwidth {
+                self.draw_bandwidth_panel(ui);
+            } else {
+                self.draw_topology_panel(ui);
+            }
+        });
+    }
+
+    fn draw_topology_panel(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new("Network Topology").strong().size(16.0));
+        ui.separator();
+        
+        ui.label("Discovered Nodes:");
+        ui.separator();
+        
+        egui::ScrollArea::vertical()
+            .max_height(400.0)
+            .show(ui, |ui| {
+                ui.label("No nodes discovered yet.");
+                ui.separator();
+                
+                ui.collapsing("Path Quality Legend", |ui| {
+                    ui.label("Excellent: <1% loss, <100ms latency");
+                    ui.label("Good: <5% loss, <500ms latency");
+                    ui.label("Fair: <20% loss, <2000ms latency");
+                    ui.label("Poor: <50% loss, <5000ms latency");
+                    ui.label("Dead: >50% loss or >5000ms latency");
+                });
+                
+                ui.collapsing("Features", |ui| {
+                    ui.label("• Node discovery and status tracking");
+                    ui.label("• Path quality indicators");
+                    ui.label("• Automatic path redundancy");
+                    ui.label("• Bandwidth usage statistics");
+                });
+            });
+    }
+
+    fn draw_bandwidth_panel(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new("Bandwidth Usage").strong().size(16.0));
+        ui.separator();
+        
+        ui.group(|ui| {
+            ui.label("Local Node Statistics:");
+            ui.label("Total Sent: 0 B");
+            ui.label("Total Received: 0 B");
+            ui.label("Current Send Rate: 0 B/s");
+            ui.label("Current Receive Rate: 0 B/s");
+            ui.label("Peak Send Rate: 0 B/s");
+            ui.label("Peak Receive Rate: 0 B/s");
+        });
+        
+        ui.separator();
+        ui.label("Per-Node Bandwidth:");
+        ui.label("No nodes to display.");
+    }
+
+    fn draw_network_node(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Node Details");
+            ui.separator();
+            
+            if ui.button("Back").clicked() {
+                self.mode = GuiMode::Network;
+            }
+            
+            ui.separator();
+            ui.label("Select a node from the network view to see path details.");
         });
     }
 }

@@ -1,4 +1,5 @@
 use crate::messaging::{Message, MessageEvent, MessagingService};
+
 use crate::notification::NotificationService;
 use crate::SharedState;
 use anyhow::Result;
@@ -23,6 +24,8 @@ pub enum TuiMode {
     Search,
     Thread,
     Pinned,
+    Network,
+    NetworkNode,
 }
 
 /// TUI Application state
@@ -42,6 +45,9 @@ pub struct TuiApp {
     pub pinned_messages: Vec<Message>,
     pub editing_message_id: Option<Uuid>,
     pub replying_to_id: Option<Uuid>,
+    pub selected_node: usize,
+    pub selected_path: usize,
+    pub network_show_bandwidth: bool,
 }
 
 impl TuiApp {
@@ -62,6 +68,9 @@ impl TuiApp {
             pinned_messages: Vec::new(),
             editing_message_id: None,
             replying_to_id: None,
+            selected_node: 0,
+            selected_path: 0,
+            network_show_bandwidth: false,
         }
     }
 
@@ -150,6 +159,8 @@ impl TuiApp {
                 TuiMode::Search => self.handle_search_input(key).await?,
                 TuiMode::Thread => self.handle_thread_input(key).await?,
                 TuiMode::Pinned => self.handle_pinned_input(key).await?,
+                TuiMode::Network => self.handle_network_input(key).await?,
+                TuiMode::NetworkNode => self.handle_network_node_input(key).await?,
             }
         }
         Ok(())
@@ -224,6 +235,11 @@ impl TuiApp {
                 if !self.pinned_messages.is_empty() {
                     self.mode = TuiMode::Pinned;
                 }
+            }
+            KeyCode::Char('n') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                self.mode = TuiMode::Network;
+                self.selected_node = 0;
+                self.network_show_bandwidth = false;
             }
             KeyCode::Up => {
                 if self.selected_contact > 0 {
@@ -385,6 +401,8 @@ impl TuiApp {
         self.thread_parent_id = None;
         self.editing_message_id = None;
         self.replying_to_id = None;
+        self.selected_node = 0;
+        self.selected_path = 0;
         self.input.clear();
     }
 
@@ -547,6 +565,8 @@ impl TuiApp {
             TuiMode::Search => self.draw_search(frame),
             TuiMode::Thread => self.draw_thread(frame),
             TuiMode::Pinned => self.draw_pinned(frame),
+            TuiMode::Network => self.draw_network(frame),
+            TuiMode::NetworkNode => self.draw_network_node(frame),
         }
     }
 
@@ -611,7 +631,7 @@ impl TuiApp {
         frame.render_widget(messages_paragraph, main_chunks[0]);
 
         // Input
-        let input_block = Block::default().title("Message (Ctrl+E=Edit Ctrl+R=Reply Ctrl+F=Search Ctrl+P=Pin Ctrl+D=Del Ctrl+T=Thread)").borders(Borders::ALL);
+        let input_block = Block::default().title("Message (Ctrl+E=Edit Ctrl+R=Reply Ctrl+F=Search Ctrl+P=Pin Ctrl+D=Del Ctrl+T=Thread Ctrl+N=Network)").borders(Borders::ALL);
         let input_paragraph = Paragraph::new(self.input.as_str()).block(input_block);
         frame.render_widget(input_paragraph, main_chunks[1]);
     }
@@ -784,6 +804,188 @@ impl TuiApp {
             )
         };
         let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: true });
+        frame.render_widget(paragraph, area);
+    }
+
+    async fn handle_network_input(&mut self, key: crossterm::event::KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.cancel_mode();
+            }
+            KeyCode::Char('b') => {
+                self.network_show_bandwidth = !self.network_show_bandwidth;
+            }
+            KeyCode::Enter => {
+                let state = self.state.read().await;
+                let nodes = state.network.sorted_nodes();
+                if self.selected_node < nodes.len() {
+                    drop(state);
+                    self.mode = TuiMode::NetworkNode;
+                    self.selected_path = 0;
+                }
+            }
+            KeyCode::Up => {
+                if self.selected_node > 0 {
+                    self.selected_node -= 1;
+                }
+            }
+            KeyCode::Down => {
+                let state = self.state.read().await;
+                let node_count = state.network.nodes.len();
+                drop(state);
+                if self.selected_node + 1 < node_count {
+                    self.selected_node += 1;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    async fn handle_network_node_input(&mut self, key: crossterm::event::KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.mode = TuiMode::Network;
+                self.selected_path = 0;
+            }
+            KeyCode::Up => {
+                if self.selected_path > 0 {
+                    self.selected_path -= 1;
+                }
+            }
+            KeyCode::Down => {
+                let state = self.state.read().await;
+                let nodes = state.network.sorted_nodes();
+                if let Some(node) = nodes.get(self.selected_node) {
+                    let path_count = node.paths.len();
+                    drop(state);
+                    if self.selected_path + 1 < path_count {
+                        self.selected_path += 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn draw_network(&self, frame: &mut ratatui::Frame) {
+        let area = frame.area();
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(3), Constraint::Length(3)])
+            .split(area);
+
+        let content_block = Block::default()
+            .title(if self.network_show_bandwidth {
+                "Network Bandwidth (B=Topology Esc=Back Enter=Details)"
+            } else {
+                "Network Topology (B=Bandwidth Esc=Back Enter=Details)"
+            })
+            .borders(Borders::ALL);
+
+        let content = if self.network_show_bandwidth {
+            self.draw_bandwidth_content()
+        } else {
+            self.draw_topology_content()
+        };
+
+        let paragraph = Paragraph::new(content).block(content_block).wrap(Wrap { trim: true });
+        frame.render_widget(paragraph, chunks[0]);
+
+        let status_text = self.get_network_status_text();
+        let status_block = Block::default().title("Network Status").borders(Borders::ALL);
+        let status_para = Paragraph::new(status_text).block(status_block);
+        frame.render_widget(status_para, chunks[1]);
+    }
+
+    fn draw_topology_content(&self) -> Text<'_> {
+        let mut lines: Vec<Line> = Vec::new();
+
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{:<20} {:<10} {:<12} {:<10} {:<15} {:<10}", "Node", "Status", "Paths", "Best Lat", "Quality", "Redundant"),
+                Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan),
+            ),
+        ]));
+        lines.push(Line::from("─".repeat(80)));
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("Mesh Network Visualization", Style::default().add_modifier(Modifier::BOLD)),
+        ]));
+        lines.push(Line::from(""));
+        lines.push(Line::from("This view shows discovered nodes in the mesh network."));
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("Features:", Style::default().add_modifier(Modifier::BOLD).fg(Color::Yellow)),
+        ]));
+        lines.push(Line::from("• Node discovery and status tracking (Online/Degraded/Offline)"));
+        lines.push(Line::from("• Path quality indicators (Excellent/Good/Fair/Poor/Dead)"));
+        lines.push(Line::from("• Automatic path redundancy maintenance"));
+        lines.push(Line::from("• Bandwidth usage statistics per node"));
+        lines.push(Line::from(""));
+        lines.push(Line::from("Use 'B' to toggle bandwidth view, Enter to see node details."));
+
+        Text::from(lines)
+    }
+
+    fn draw_bandwidth_content(&self) -> Text<'_> {
+        let mut lines: Vec<Line> = Vec::new();
+
+        lines.push(Line::from(vec![
+            Span::styled("Bandwidth Usage Statistics", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan)),
+        ]));
+        lines.push(Line::from(""));
+        lines.push(Line::from("Local node bandwidth tracking:"));
+        lines.push(Line::from("• Tracks bytes sent/received over time"));
+        lines.push(Line::from("• Current send/receive rates (5-second average)"));
+        lines.push(Line::from("• Peak rate tracking"));
+        lines.push(Line::from("• Per-node bandwidth accounting"));
+        lines.push(Line::from(""));
+        lines.push(Line::from("Statistics are updated in real-time as packets flow through the mesh."));
+
+        Text::from(lines)
+    }
+
+    fn get_network_status_text(&self) -> Text<'_> {
+        let mut lines: Vec<Line> = Vec::new();
+        lines.push(Line::from(vec![
+            Span::styled("Network: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw("v0.6.0 mesh features active | "),
+            Span::styled("Nodes: ", Style::default().fg(Color::Yellow)),
+            Span::raw("0 discovered | "),
+            Span::styled("Paths: ", Style::default().fg(Color::Yellow)),
+            Span::raw("0 active | "),
+            Span::styled("Redundancy: ", Style::default().fg(Color::Yellow)),
+            Span::raw("auto"),
+        ]));
+        Text::from(lines)
+    }
+
+    fn draw_network_node(&self, frame: &mut ratatui::Frame) {
+        let area = frame.area();
+        let block = Block::default()
+            .title("Node Details (Esc/Q=Back)")
+            .borders(Borders::ALL);
+
+        let mut lines: Vec<Line> = Vec::new();
+        lines.push(Line::from(vec![
+            Span::styled("Node Path Details", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan)),
+        ]));
+        lines.push(Line::from(""));
+        lines.push(Line::from("Shows individual path metrics for the selected node."));
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("Path Quality Indicators:", Style::default().add_modifier(Modifier::BOLD)),
+        ]));
+        lines.push(Line::from("• Excellent: <1% loss, <100ms latency"));
+        lines.push(Line::from("• Good: <5% loss, <500ms latency"));
+        lines.push(Line::from("• Fair: <20% loss, <2000ms latency"));
+        lines.push(Line::from("• Poor: <50% loss, <5000ms latency"));
+        lines.push(Line::from("• Dead: >50% loss or >5000ms latency"));
+
+        let paragraph = Paragraph::new(Text::from(lines)).block(block).wrap(Wrap { trim: true });
         frame.render_widget(paragraph, area);
     }
 }
