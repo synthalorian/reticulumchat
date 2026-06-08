@@ -3,24 +3,27 @@
 [![CI](https://github.com/reticulumchat/reticulumchat/actions/workflows/ci.yml/badge.svg)](https://github.com/reticulumchat/reticulumchat/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust Version](https://img.shields.io/badge/rust-1.82%2B-blue.svg)](https://www.rust-lang.org)
+[![Version](https://img.shields.io/badge/version-0.9.0-green.svg)](./CHANGELOG.md)
 
 A chat client for the [Reticulum](https://reticulum.network/) mesh network, built in Rust with support for both terminal (TUI) and graphical (GUI) interfaces.
 
 ## Features
 
 - **Dual Interface**: Run in TUI mode (ratatui) or GUI mode (egui/eframe)
-- **Mesh Network Visualization**: View discovered nodes, path quality, and network topology
+- **Mesh Network Visualization**: View discovered nodes, path quality, and network topology in real-time
 - **End-to-End Encryption**: Age-based X25519 encryption for private messages
 - **Advanced Messaging**:
   - Message editing and deletion
   - Reply threads
   - @mentions with notifications
-  - Message search
+  - Full-text message search
   - Pinned messages
   - Delivery confirmations
 - **Offline Support**: Message queue for when network is unavailable
-- **Desktop Notifications**: System notifications for mentions and messages
+- **Desktop Notifications**: System notifications for mentions and messages via `notify-rust`
 - **Cross-Platform**: Linux, macOS, and Windows support
+- **Config Migration**: Built-in configuration migration system
+- **Beta Feedback**: Integrated feedback collection for beta testing
 
 ## Quick Start
 
@@ -46,7 +49,7 @@ cargo build --release --features gui
 cargo run
 ```
 
-### Usage
+### Basic Usage
 
 ```bash
 # TUI mode (default)
@@ -63,7 +66,72 @@ cargo run
   --identity ~/.reticulumchat/identity
 ```
 
-### TUI Controls
+## Usage Examples
+
+### Starting the Client
+
+```bash
+# Start in TUI mode with default settings
+reticulumchat
+
+# Start in GUI mode
+reticulumchat --mode gui
+
+# Connect to a remote Reticulum instance
+reticulumchat --host 192.168.1.100 --port 4242
+
+# Use a custom identity and display name
+reticulumchat --name bob --identity ~/.reticulumchat/bob-id
+
+# Disable desktop notifications
+reticulumchat --no-notifications
+
+# Disable end-to-end encryption
+reticulumchat --no-encryption
+```
+
+### Configuration Management
+
+```bash
+# Migrate an old configuration file to the current format
+reticulumchat config-migrate --config ~/.reticulumchat/config.json
+
+# Migrate with backup disabled
+reticulumchat config-migrate --config ~/.reticulumchat/config.json --backup false
+```
+
+### Beta Feedback
+
+```bash
+# Submit general feedback
+reticulumchat feedback --message "Love the new thread feature!"
+
+# Submit a bug report with attachment
+reticulumchat feedback \
+  --message "App crashes when viewing large network topologies" \
+  --category bug \
+  --attachment ./logs/crash.log
+
+# Submit a feature request
+reticulumchat feedback \
+  --message "Please add voice message support" \
+  --category feature
+
+# Interactive feedback (reads from stdin)
+reticulumchat feedback --category general
+```
+
+### Environment Variables
+
+```bash
+# Control log level
+RUST_LOG=debug reticulumchat
+
+# Or for specific modules
+RUST_LOG=reticulumchat::network=trace reticulumchat
+```
+
+## TUI Controls
 
 | Key | Action |
 |-----|--------|
@@ -78,6 +146,29 @@ cargo run
 | `Ctrl+V` | View pinned messages |
 | `Ctrl+N` | Network view |
 | `Up/Down` | Navigate contacts |
+| `Tab` | Switch focus between panels |
+| `Page Up/Down` | Scroll message history |
+
+## Configuration
+
+ReticulumChat stores its configuration and identity in `~/.reticulumchat/` by default.
+
+### Default Config File (`~/.reticulumchat/config.json`)
+
+```json
+{
+  "identity_path": "~/.reticulumchat/identity",
+  "reticulum_host": "127.0.0.1",
+  "reticulum_port": 3742,
+  "enable_notifications": true,
+  "enable_encryption": true,
+  "version": 1
+}
+```
+
+### Identity File (`~/.reticulumchat/identity`)
+
+The identity file contains your X25519 keypair used for encryption and Reticulum destination generation. It is created automatically on first run if it does not exist.
 
 ## Docker
 
@@ -112,24 +203,37 @@ cargo test --test integration_test
 ```
 reticulumchat/
 ├── src/
-│   ├── main.rs          # CLI entry point
-│   ├── lib.rs           # Library exports
-│   ├── crypto.rs        # Age-based E2E encryption
-│   ├── identity.rs      # Identity generation (X25519)
-│   ├── messaging.rs     # Messages, history, queue
-│   ├── network.rs       # Mesh network, paths, bandwidth
-│   ├── notification.rs  # Desktop notifications
-│   ├── reticulum.rs     # Reticulum protocol client
-│   ├── tui/             # Terminal UI implementation
-│   └── gui/             # Graphical UI implementation
+│   ├── main.rs          # CLI entry point with clap argument parsing
+│   ├── lib.rs           # Library exports, Config, AppState, AppRuntime
+│   ├── crypto.rs        # Age-based E2E encryption (X25519, ChaCha20-Poly1305)
+│   ├── identity.rs      # Identity generation and Reticulum destination hash
+│   ├── messaging.rs     # Messages, history, offline queue, delivery confirmations
+│   ├── network.rs       # Mesh network, paths, bandwidth stats, topology
+│   ├── notification.rs  # Desktop notifications via notify-rust
+│   ├── reticulum.rs     # Reticulum protocol client (TCP/Unix socket)
+│   ├── crash_reporter.rs # Panic hook and crash reporting
+│   ├── tui/             # Terminal UI implementation (ratatui)
+│   └── gui/             # Graphical UI implementation (egui/eframe)
 ├── tests/               # Integration tests
 ├── docs/                # Documentation
+│   ├── ARCHITECTURE.md  # Detailed architecture documentation
+│   └── DEMO_MESH_SETUP.md # Demo mesh network setup guide
 └── scripts/             # Build scripts
 ```
 
 ### Architecture
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation including:
+- System architecture diagram
+- Module breakdown
+- Data flow for sending/receiving messages
+- Network discovery process
+- Concurrency model
+- Testing strategy
+
+## Mesh Network Setup
+
+See [docs/DEMO_MESH_SETUP.md](docs/DEMO_MESH_SETUP.md) for a complete guide to setting up a demo mesh network with multiple ReticulumChat nodes.
 
 ## Building for Release
 
@@ -157,17 +261,44 @@ cargo build --release
 cargo build --release --target x86_64-pc-windows-msvc
 ```
 
+## Troubleshooting
+
+### GUI mode fails to start
+
+If you get an error about the `gui` feature not being enabled, rebuild with:
+```bash
+cargo build --release --features gui
+```
+
+### Cannot connect to Reticulum instance
+
+Ensure your Reticulum instance is running and accessible at the host/port specified. The default is `127.0.0.1:3742`.
+
+### Identity file issues
+
+If your identity file becomes corrupted, delete `~/.reticulumchat/identity` and restart. A new identity will be generated automatically.
+
+### Config migration errors
+
+If you encounter config parsing errors after upgrading, run:
+```bash
+reticulumchat config-migrate --config ~/.reticulumchat/config.json
+```
+
 ## Roadmap
 
 See [PLAN.md](PLAN.md) for the full development roadmap.
 
-Current version: **v0.7.0** — Pre-release polish
+Current version: **v0.9.0** — Release candidate
 
-- [x] Comprehensive test suite
-- [x] CI/CD with GitHub Actions
-- [x] Cross-platform builds
-- [x] Docker image
-- [x] Documentation
+- [x] Final API freeze
+- [x] Documentation complete
+- [x] Demo mesh network setup
+- [x] Release notes draft
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.
 
 ## License
 
