@@ -78,7 +78,7 @@ reticulumchat
 reticulumchat --mode gui
 
 # Connect to a remote Reticulum instance
-reticulumchat --host 192.168.1.100 --port 4242
+reticulumchat --host 192.168.1.1 --port 4242
 
 # Use a custom identity and display name
 reticulumchat --name bob --identity ~/.reticulumchat/bob-id
