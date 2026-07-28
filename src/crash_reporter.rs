@@ -19,9 +19,9 @@ impl CrashReport {
         let backtrace = Backtrace::new();
         let backtrace_str = format!("{:?}", backtrace);
 
-        let location = info.location().map(|loc| {
-            format!("{}:{}:{}", loc.file(), loc.line(), loc.column())
-        });
+        let location = info
+            .location()
+            .map(|loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()));
 
         let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
             s.to_string()
@@ -66,9 +66,7 @@ impl CrashReport {
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home)
-            .join(".reticulumchat")
-            .join("crashes")
+        PathBuf::from(home).join(".reticulumchat").join("crashes")
     }
 
     /// Save the crash report to the default reports directory
@@ -76,10 +74,7 @@ impl CrashReport {
         let dir = Self::default_reports_dir();
         std::fs::create_dir_all(&dir)?;
 
-        let filename = format!(
-            "crash-report-{}.txt",
-            Utc::now().format("%Y%m%d-%H%M%S")
-        );
+        let filename = format!("crash-report-{}.txt", Utc::now().format("%Y%m%d-%H%M%S"));
         let path = dir.join(&filename);
         std::fs::write(&path, self.format())?;
 
@@ -108,7 +103,10 @@ pub fn install_panic_hook() {
         match report.save() {
             Ok(path) => {
                 eprintln!("\n[CRASH] The application has crashed.");
-                eprintln!("[CRASH] A crash report has been saved to: {}", path.display());
+                eprintln!(
+                    "[CRASH] A crash report has been saved to: {}",
+                    path.display()
+                );
                 eprintln!("[CRASH] Please report this issue at: https://github.com/reticulumchat/reticulumchat/issues\n");
             }
             Err(e) => {

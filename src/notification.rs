@@ -109,7 +109,10 @@ impl NotificationService {
 
         Notification::new()
             .summary(&format!("Message {}", status))
-            .body(&format!("Your message to {} has been {}", recipient, status))
+            .body(&format!(
+                "Your message to {} has been {}",
+                recipient, status
+            ))
             .icon("dialog-information")
             .appname(&self.app_name)
             .urgency(Urgency::Low)
@@ -167,10 +170,10 @@ mod tests {
     fn test_mention_detection() {
         let mut service = NotificationService::new("TestApp");
         service.set_current_user("alice");
-        
-        assert!(service.is_mentioned(&vec!["bob".to_string(), "alice".to_string()]));
-        assert!(service.is_mentioned(&vec!["ALICE".to_string()])); // case insensitive
-        assert!(!service.is_mentioned(&vec!["bob".to_string(), "charlie".to_string()]));
+
+        assert!(service.is_mentioned(&["bob".to_string(), "alice".to_string()]));
+        assert!(service.is_mentioned(&["ALICE".to_string()])); // case insensitive
+        assert!(!service.is_mentioned(&["bob".to_string(), "charlie".to_string()]));
     }
 
     #[test]

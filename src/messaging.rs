@@ -42,7 +42,11 @@ pub struct Message {
 }
 
 impl Message {
-    pub fn new(sender: impl Into<String>, recipient: impl Into<String>, content: impl Into<String>) -> Self {
+    pub fn new(
+        sender: impl Into<String>,
+        recipient: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
         let content_str = content.into();
         let mentions = Self::extract_mentions(&content_str);
         Self {
@@ -78,7 +82,9 @@ impl Message {
         let mut mentions = Vec::new();
         for word in content.split_whitespace() {
             if word.starts_with('@') {
-                let mention = word.trim_start_matches('@').trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '-');
+                let mention = word
+                    .trim_start_matches('@')
+                    .trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '-');
                 if !mention.is_empty() {
                     mentions.push(mention.to_lowercase());
                 }
@@ -206,6 +212,12 @@ impl OfflineQueue {
     }
 }
 
+impl Default for OfflineQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Message history for a conversation with search and thread support
 #[derive(Debug, Clone)]
 pub struct MessageHistory {
@@ -234,6 +246,10 @@ impl MessageHistory {
 
     /// Add a message to history
     pub fn add(&mut self, message: Message) {
+        // A zero-capacity history discards all messages instead of panicking
+        if self.max_size == 0 {
+            return;
+        }
         if self.messages.len() >= self.max_size {
             // Remove oldest message from index
             if let Some(oldest) = self.messages.first() {
@@ -250,7 +266,9 @@ impl MessageHistory {
 
     /// Get a message by ID
     pub fn get(&self, id: Uuid) -> Option<&Message> {
-        self.id_index.get(&id).and_then(|&idx| self.messages.get(idx))
+        self.id_index
+            .get(&id)
+            .and_then(|&idx| self.messages.get(idx))
     }
 
     /// Get a mutable message by ID
@@ -264,7 +282,8 @@ impl MessageHistory {
 
     /// Edit a message by ID
     pub fn edit_message(&mut self, id: Uuid, new_content: impl Into<String>) -> Result<()> {
-        let msg = self.get_mut(id)
+        let msg = self
+            .get_mut(id)
             .ok_or_else(|| anyhow::anyhow!("Message not found: {}", id))?;
         msg.edit(new_content);
         Ok(())
@@ -272,7 +291,8 @@ impl MessageHistory {
 
     /// Delete a message by ID
     pub fn delete_message(&mut self, id: Uuid) -> Result<()> {
-        let msg = self.get_mut(id)
+        let msg = self
+            .get_mut(id)
             .ok_or_else(|| anyhow::anyhow!("Message not found: {}", id))?;
         msg.mark_deleted();
         Ok(())
@@ -280,7 +300,8 @@ impl MessageHistory {
 
     /// Pin a message by ID
     pub fn pin_message(&mut self, id: Uuid, pinned_by: impl Into<String>) -> Result<()> {
-        let msg = self.get_mut(id)
+        let msg = self
+            .get_mut(id)
             .ok_or_else(|| anyhow::anyhow!("Message not found: {}", id))?;
         msg.pin(pinned_by);
         Ok(())
@@ -288,7 +309,8 @@ impl MessageHistory {
 
     /// Unpin a message by ID
     pub fn unpin_message(&mut self, id: Uuid) -> Result<()> {
-        let msg = self.get_mut(id)
+        let msg = self
+            .get_mut(id)
             .ok_or_else(|| anyhow::anyhow!("Message not found: {}", id))?;
         msg.unpin();
         Ok(())
@@ -296,34 +318,47 @@ impl MessageHistory {
 
     /// Get all pinned messages, sorted by pin time (newest first)
     pub fn pinned_messages(&self) -> Vec<&Message> {
-        let mut pinned: Vec<&Message> = self.messages.iter()
-            .filter(|m| m.pinned)
-            .collect();
-        pinned.sort_by(|a, b| b.pinned_at.cmp(&a.pinned_at));
+        let mut pinned: Vec<&Message> = self.messages.iter().filter(|m| m.pinned).collect();
+        pinned.sort_by_key(|m| std::cmp::Reverse(m.pinned_at));
         pinned
     }
 
     /// Get replies to a specific message (thread)
     pub fn thread_replies(&self, parent_id: Uuid) -> Vec<&Message> {
-        self.messages.iter()
+        self.messages
+            .iter()
             .filter(|m| m.parent_id == Some(parent_id))
             .collect()
     }
 
     /// Get the root message of a thread given any message in it
+    ///
+    /// Walks parent links iteratively with cycle detection so malformed
+    /// histories (e.g. a message that is its own ancestor) cannot cause
+    /// unbounded recursion. If a cycle or a missing parent is found, the
+    /// deepest reachable message is returned.
     pub fn thread_root(&self, message_id: Uuid) -> Option<&Message> {
-        let msg = self.get(message_id)?;
-        if let Some(parent_id) = msg.parent_id {
-            self.thread_root(parent_id)
-        } else {
-            Some(msg)
+        let mut current = self.get(message_id)?;
+        let mut visited = std::collections::HashSet::new();
+        visited.insert(current.id);
+        while let Some(parent_id) = current.parent_id {
+            if !visited.insert(parent_id) {
+                // Cycle detected: stop at the deepest reachable message
+                break;
+            }
+            match self.get(parent_id) {
+                Some(parent) => current = parent,
+                None => break,
+            }
         }
+        Some(current)
     }
 
     /// Search messages by content (case-insensitive)
     pub fn search(&self, query: &str) -> Vec<&Message> {
         let query_lower = query.to_lowercase();
-        self.messages.iter()
+        self.messages
+            .iter()
             .filter(|m| !m.deleted && m.content.to_lowercase().contains(&query_lower))
             .collect()
     }
@@ -331,7 +366,8 @@ impl MessageHistory {
     /// Search messages by sender
     pub fn search_by_sender(&self, sender: &str) -> Vec<&Message> {
         let sender_lower = sender.to_lowercase();
-        self.messages.iter()
+        self.messages
+            .iter()
             .filter(|m| m.sender.to_lowercase() == sender_lower)
             .collect()
     }
@@ -339,7 +375,8 @@ impl MessageHistory {
     /// Search messages by mention
     pub fn search_by_mention(&self, username: &str) -> Vec<&Message> {
         let username_lower = username.to_lowercase();
-        self.messages.iter()
+        self.messages
+            .iter()
             .filter(|m| m.mentions.contains(&username_lower))
             .collect()
     }
@@ -356,9 +393,7 @@ impl MessageHistory {
 
     /// Get messages excluding deleted ones
     pub fn visible_messages(&self) -> Vec<&Message> {
-        self.messages.iter()
-            .filter(|m| !m.deleted)
-            .collect()
+        self.messages.iter().filter(|m| !m.deleted).collect()
     }
 
     /// Number of messages in history
@@ -395,12 +430,27 @@ impl Default for MessageHistory {
 pub enum MessageEvent {
     MessageReceived(Message),
     DeliveryConfirmed(DeliveryConfirmation),
-    QueueUpdated { count: usize },
-    MessageEdited { message_id: Uuid, new_content: String },
-    MessageDeleted { message_id: Uuid },
-    MessagePinned { message_id: Uuid, pinned_by: String },
-    MessageUnpinned { message_id: Uuid },
-    MentionReceived { message: Message, mentioned_user: String },
+    QueueUpdated {
+        count: usize,
+    },
+    MessageEdited {
+        message_id: Uuid,
+        new_content: String,
+    },
+    MessageDeleted {
+        message_id: Uuid,
+    },
+    MessagePinned {
+        message_id: Uuid,
+        pinned_by: String,
+    },
+    MessageUnpinned {
+        message_id: Uuid,
+    },
+    MentionReceived {
+        message: Message,
+        mentioned_user: String,
+    },
 }
 
 /// The messaging service handles sending, receiving, queuing, and confirmations
@@ -446,14 +496,19 @@ impl MessagingService {
     pub async fn receive_message(&mut self, message: Message) -> Result<()> {
         // Emit mention events for each mentioned user
         for mention in &message.mentions {
-            let _ = self.event_tx.send(MessageEvent::MentionReceived {
-                message: message.clone(),
-                mentioned_user: mention.clone(),
-            }).await;
+            let _ = self
+                .event_tx
+                .send(MessageEvent::MentionReceived {
+                    message: message.clone(),
+                    mentioned_user: mention.clone(),
+                })
+                .await;
         }
-        
+
         self.history.add(message.clone());
-        self.event_tx.send(MessageEvent::MessageReceived(message)).await?;
+        self.event_tx
+            .send(MessageEvent::MessageReceived(message))
+            .await?;
         Ok(())
     }
 
@@ -466,38 +521,56 @@ impl MessagingService {
     }
 
     /// Edit a message in history and emit event
-    pub async fn edit_message(&mut self, message_id: Uuid, new_content: impl Into<String>) -> Result<()> {
+    pub async fn edit_message(
+        &mut self,
+        message_id: Uuid,
+        new_content: impl Into<String>,
+    ) -> Result<()> {
         let new_content_str = new_content.into();
-        self.history.edit_message(message_id, new_content_str.clone())?;
-        self.event_tx.send(MessageEvent::MessageEdited {
-            message_id,
-            new_content: new_content_str,
-        }).await?;
+        self.history
+            .edit_message(message_id, new_content_str.clone())?;
+        self.event_tx
+            .send(MessageEvent::MessageEdited {
+                message_id,
+                new_content: new_content_str,
+            })
+            .await?;
         Ok(())
     }
 
     /// Delete a message from history and emit event
     pub async fn delete_message(&mut self, message_id: Uuid) -> Result<()> {
         self.history.delete_message(message_id)?;
-        self.event_tx.send(MessageEvent::MessageDeleted { message_id }).await?;
+        self.event_tx
+            .send(MessageEvent::MessageDeleted { message_id })
+            .await?;
         Ok(())
     }
 
     /// Pin a message and emit event
-    pub async fn pin_message(&mut self, message_id: Uuid, pinned_by: impl Into<String>) -> Result<()> {
+    pub async fn pin_message(
+        &mut self,
+        message_id: Uuid,
+        pinned_by: impl Into<String>,
+    ) -> Result<()> {
         let pinned_by_str = pinned_by.into();
-        self.history.pin_message(message_id, pinned_by_str.clone())?;
-        self.event_tx.send(MessageEvent::MessagePinned {
-            message_id,
-            pinned_by: pinned_by_str,
-        }).await?;
+        self.history
+            .pin_message(message_id, pinned_by_str.clone())?;
+        self.event_tx
+            .send(MessageEvent::MessagePinned {
+                message_id,
+                pinned_by: pinned_by_str,
+            })
+            .await?;
         Ok(())
     }
 
     /// Unpin a message and emit event
     pub async fn unpin_message(&mut self, message_id: Uuid) -> Result<()> {
         self.history.unpin_message(message_id)?;
-        self.event_tx.send(MessageEvent::MessageUnpinned { message_id }).await?;
+        self.event_tx
+            .send(MessageEvent::MessageUnpinned { message_id })
+            .await?;
         Ok(())
     }
 }
@@ -592,10 +665,10 @@ mod tests {
         let mut history = MessageHistory::new();
         let msg1 = Message::new("alice", "bob", "first message");
         let msg2 = Message::new("bob", "alice", "second message");
-        
+
         history.add(msg1.clone());
         history.add(msg2.clone());
-        
+
         assert_eq!(history.len(), 2);
         assert_eq!(history.get(msg1.id).unwrap().content, "first message");
         assert_eq!(history.get(msg2.id).unwrap().content, "second message");
@@ -607,10 +680,10 @@ mod tests {
         history.add(Message::new("alice", "bob", "hello world"));
         history.add(Message::new("bob", "alice", "goodbye world"));
         history.add(Message::new("alice", "bob", "hello again"));
-        
+
         let results = history.search("hello");
         assert_eq!(results.len(), 2);
-        
+
         let results = history.search("goodbye");
         assert_eq!(results.len(), 1);
     }
@@ -620,10 +693,10 @@ mod tests {
         let mut history = MessageHistory::new();
         let msg = Message::new("alice", "bob", "original");
         history.add(msg.clone());
-        
+
         history.edit_message(msg.id, "edited").unwrap();
         assert_eq!(history.get(msg.id).unwrap().content, "edited");
-        
+
         history.delete_message(msg.id).unwrap();
         assert!(history.get(msg.id).unwrap().deleted);
     }
@@ -633,12 +706,12 @@ mod tests {
         let mut history = MessageHistory::new();
         let msg = Message::new("alice", "bob", "important");
         history.add(msg.clone());
-        
+
         history.pin_message(msg.id, "bob").unwrap();
         let pinned = history.pinned_messages();
         assert_eq!(pinned.len(), 1);
         assert_eq!(pinned[0].content, "important");
-        
+
         history.unpin_message(msg.id).unwrap();
         assert!(history.pinned_messages().is_empty());
     }
@@ -648,12 +721,12 @@ mod tests {
         let mut history = MessageHistory::new();
         let parent = Message::new("alice", "bob", "original");
         history.add(parent.clone());
-        
+
         let reply1 = Message::new("bob", "alice", "reply 1").with_parent(parent.id);
         let reply2 = Message::new("alice", "bob", "reply 2").with_parent(parent.id);
         history.add(reply1);
         history.add(reply2);
-        
+
         let replies = history.thread_replies(parent.id);
         assert_eq!(replies.len(), 2);
     }
@@ -664,10 +737,10 @@ mod tests {
         history.add(Message::new("alice", "bob", "Hey @bob!"));
         history.add(Message::new("bob", "alice", "Hi @alice!"));
         history.add(Message::new("charlie", "general", "Hello everyone"));
-        
+
         let mentions_bob = history.search_by_mention("bob");
         assert_eq!(mentions_bob.len(), 1);
-        
+
         let mentions_alice = history.search_by_mention("alice");
         assert_eq!(mentions_alice.len(), 1);
     }

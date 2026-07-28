@@ -59,7 +59,7 @@ impl E2ECipher {
             writer.finish()?;
             armored_writer.finish()?;
         }
-        
+
         Ok(String::from_utf8(armored)?)
     }
 
@@ -70,7 +70,7 @@ impl E2ECipher {
         let mut decrypted = vec![];
         let mut reader = decryptor.decrypt(iter::once(identity as &dyn age::Identity))?;
         reader.read_to_end(&mut decrypted)?;
-        
+
         String::from_utf8(decrypted).context("Decrypted data is not valid UTF-8")
     }
 }

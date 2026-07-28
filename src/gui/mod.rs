@@ -45,10 +45,16 @@ pub struct GuiApp {
 
 impl GuiApp {
     pub fn new(state: SharedState) -> Self {
-        let user_name = "user".to_string();
+        // Use the real identity name for the current user. The lock is held
+        // only momentarily at startup; fall back to a placeholder if the
+        // state is unavailable (e.g. lock contention during shutdown).
+        let user_name = state
+            .try_read()
+            .map(|s| s.identity.name.clone())
+            .unwrap_or_else(|_| "user".to_string());
         let mut notification_service = NotificationService::default();
         notification_service.set_current_user(&user_name);
-        
+
         Self {
             state,
             messages: Vec::new(),
@@ -75,17 +81,12 @@ impl GuiApp {
 
     pub fn run(self) -> Result<()> {
         let options = eframe::NativeOptions {
-            viewport: egui::ViewportBuilder::default()
-                .with_inner_size([900.0, 700.0]),
+            viewport: egui::ViewportBuilder::default().with_inner_size([900.0, 700.0]),
             ..Default::default()
         };
 
-        eframe::run_native(
-            "ReticulumChat",
-            options,
-            Box::new(|_cc| Ok(Box::new(self))),
-        )
-        .map_err(|e| anyhow::anyhow!("GUI error: {:?}", e))?;
+        eframe::run_native("ReticulumChat", options, Box::new(|_cc| Ok(Box::new(self))))
+            .map_err(|e| anyhow::anyhow!("GUI error: {:?}", e))?;
 
         Ok(())
     }
@@ -116,7 +117,8 @@ impl GuiApp {
             self.current_user.clone(),
             self.contacts[self.selected_contact].clone(),
             content,
-        ).with_parent(parent_id);
+        )
+        .with_parent(parent_id);
 
         self.messages.push(msg);
         self.input.clear();
@@ -151,7 +153,8 @@ impl GuiApp {
 
     fn perform_search(&mut self) {
         let query = self.search_query.to_lowercase();
-        self.search_results = self.messages
+        self.search_results = self
+            .messages
             .iter()
             .enumerate()
             .filter(|(_, m)| !m.deleted && m.content.to_lowercase().contains(&query))
@@ -196,14 +199,18 @@ impl eframe::App for GuiApp {
                 events.push(event);
             }
         }
-        
+
         for event in events {
             match event {
                 MessageEvent::MessageReceived(msg) => {
                     if self.notification_service.is_mentioned(&msg.mentions) {
-                        let _ = self.notification_service.notify_mention(&msg.sender, &msg.content);
+                        let _ = self
+                            .notification_service
+                            .notify_mention(&msg.sender, &msg.content);
                     } else {
-                        let _ = self.notification_service.notify_message(&msg.sender, &msg.content);
+                        let _ = self
+                            .notification_service
+                            .notify_message(&msg.sender, &msg.content);
                     }
                     self.messages.push(msg);
                 }
@@ -213,7 +220,10 @@ impl eframe::App for GuiApp {
                     }
                 }
                 MessageEvent::QueueUpdated { .. } => {}
-                MessageEvent::MessageEdited { message_id, new_content } => {
+                MessageEvent::MessageEdited {
+                    message_id,
+                    new_content,
+                } => {
                     self.edit_message(message_id, new_content);
                 }
                 MessageEvent::MessageDeleted { message_id } => {
@@ -233,7 +243,9 @@ impl eframe::App for GuiApp {
                 }
                 MessageEvent::MentionReceived { message, .. } => {
                     if !self.messages.iter().any(|m| m.id == message.id) {
-                        let _ = self.notification_service.notify_mention(&message.sender, &message.content);
+                        let _ = self
+                            .notification_service
+                            .notify_mention(&message.sender, &message.content);
                         self.messages.push(message);
                     }
                 }
@@ -302,42 +314,67 @@ impl GuiApp {
                     ui.label(format!("Chat: {}", self.contacts[self.selected_contact]));
 
                     // Messages scroll area
-                    let message_data: Vec<_> = self.messages.iter().enumerate()
-                        .map(|(i, msg)| (i, msg.id, msg.sender.clone(), msg.timestamp, msg.content.clone(), msg.pinned, msg.deleted, msg.parent_id, msg.edited_at))
+                    let message_data: Vec<_> = self
+                        .messages
+                        .iter()
+                        .enumerate()
+                        .map(|(i, msg)| {
+                            (
+                                i,
+                                msg.id,
+                                msg.sender.clone(),
+                                msg.timestamp,
+                                msg.content.clone(),
+                                msg.pinned,
+                                msg.deleted,
+                                msg.parent_id,
+                                msg.edited_at,
+                            )
+                        })
                         .collect();
-                    
+
                     egui::ScrollArea::vertical()
                         .max_height(400.0)
                         .show(ui, |ui| {
-                            for (i, msg_id, sender, timestamp, content, pinned, deleted, parent_id, edited_at) in message_data {
+                            for (
+                                i,
+                                msg_id,
+                                sender,
+                                timestamp,
+                                content,
+                                pinned,
+                                deleted,
+                                parent_id,
+                                edited_at,
+                            ) in message_data
+                            {
                                 let response = ui.group(|ui| {
                                     ui.horizontal(|ui| {
                                         if pinned {
-                                            ui.label(egui::RichText::new("📌").color(egui::Color32::YELLOW));
+                                            ui.label(
+                                                egui::RichText::new("📌")
+                                                    .color(egui::Color32::YELLOW),
+                                            );
                                         }
                                         ui.label(
                                             egui::RichText::new(sender)
                                                 .strong()
                                                 .color(egui::Color32::from_rgb(100, 180, 255)),
                                         );
-                                        ui.label(
-                                            timestamp
-                                                .format("%Y-%m-%d %H:%M")
-                                                .to_string(),
-                                        );
+                                        ui.label(timestamp.format("%Y-%m-%d %H:%M").to_string());
                                     });
-                                    
+
                                     if deleted {
                                         ui.label(
                                             egui::RichText::new("[deleted]")
                                                 .italics()
-                                                .color(egui::Color32::GRAY)
+                                                .color(egui::Color32::GRAY),
                                         );
                                     } else {
                                         if parent_id.is_some() {
                                             ui.label(
                                                 egui::RichText::new("↳ Reply")
-                                                    .color(egui::Color32::from_rgb(200, 100, 255))
+                                                    .color(egui::Color32::from_rgb(200, 100, 255)),
                                             );
                                         }
                                         ui.label(&content);
@@ -345,16 +382,16 @@ impl GuiApp {
                                             ui.label(
                                                 egui::RichText::new("(edited)")
                                                     .italics()
-                                                    .color(egui::Color32::GRAY)
+                                                    .color(egui::Color32::GRAY),
                                             );
                                         }
                                     }
                                 });
-                                
+
                                 if response.response.clicked() {
                                     self.selected_message = Some(i);
                                 }
-                                
+
                                 response.response.context_menu(|ui| {
                                     if ui.button("Reply").clicked() {
                                         self.mode = GuiMode::Reply;
@@ -397,7 +434,10 @@ impl GuiApp {
                     // Input area
                     ui.horizontal(|ui| {
                         let response = ui.text_edit_singleline(&mut self.input);
-                        if ui.button("Send").clicked() || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                        if ui.button("Send").clicked()
+                            || (response.lost_focus()
+                                && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                        {
                             self.send_message();
                         }
                     });
@@ -410,7 +450,7 @@ impl GuiApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Edit Message");
             ui.separator();
-            
+
             ui.horizontal(|ui| {
                 ui.text_edit_singleline(&mut self.input);
                 if ui.button("Save").clicked() {
@@ -433,7 +473,7 @@ impl GuiApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Reply to Message");
             ui.separator();
-            
+
             // Show parent message
             if let Some(parent_id) = self.replying_to_id {
                 if let Some(parent) = self.messages.iter().find(|m| m.id == parent_id) {
@@ -442,7 +482,7 @@ impl GuiApp {
                     });
                 }
             }
-            
+
             ui.horizontal(|ui| {
                 ui.text_edit_singleline(&mut self.input);
                 if ui.button("Send Reply").clicked() {
@@ -462,11 +502,13 @@ impl GuiApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Search Messages");
             ui.separator();
-            
+
             ui.horizontal(|ui| {
                 ui.label("Query:");
                 let response = ui.text_edit_singleline(&mut self.search_query);
-                if ui.button("Search").clicked() || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                if ui.button("Search").clicked()
+                    || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                {
                     self.perform_search();
                 }
                 if ui.button("Clear").clicked() {
@@ -478,11 +520,11 @@ impl GuiApp {
                     self.reset_mode();
                 }
             });
-            
+
             if self.show_search_results {
                 ui.separator();
                 ui.label(format!("Found {} results", self.search_results.len()));
-                
+
                 egui::ScrollArea::vertical()
                     .max_height(500.0)
                     .show(ui, |ui| {
@@ -495,7 +537,9 @@ impl GuiApp {
                                                 .strong()
                                                 .color(egui::Color32::from_rgb(100, 180, 255)),
                                         );
-                                        ui.label(msg.timestamp.format("%Y-%m-%d %H:%M").to_string());
+                                        ui.label(
+                                            msg.timestamp.format("%Y-%m-%d %H:%M").to_string(),
+                                        );
                                     });
                                     ui.label(&msg.content);
                                 });
@@ -510,13 +554,13 @@ impl GuiApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Thread View");
             ui.separator();
-            
+
             if ui.button("Back").clicked() {
                 self.reset_mode();
             }
-            
+
             ui.separator();
-            
+
             let thread_messages = self.get_thread_messages();
             if thread_messages.is_empty() {
                 ui.label("No messages in this thread.");
@@ -538,7 +582,7 @@ impl GuiApp {
                                     ui.label(
                                         egui::RichText::new("[deleted]")
                                             .italics()
-                                            .color(egui::Color32::GRAY)
+                                            .color(egui::Color32::GRAY),
                                     );
                                 } else {
                                     ui.label(&msg.content);
@@ -546,7 +590,7 @@ impl GuiApp {
                                         ui.label(
                                             egui::RichText::new("(edited)")
                                                 .italics()
-                                                .color(egui::Color32::GRAY)
+                                                .color(egui::Color32::GRAY),
                                         );
                                     }
                                 }
@@ -561,13 +605,13 @@ impl GuiApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Pinned Messages");
             ui.separator();
-            
+
             if ui.button("Back").clicked() {
                 self.reset_mode();
             }
-            
+
             ui.separator();
-            
+
             if self.pinned_messages.is_empty() {
                 ui.label("No pinned messages.");
             } else {
@@ -587,9 +631,12 @@ impl GuiApp {
                                 });
                                 ui.label(&msg.content);
                                 ui.label(
-                                    egui::RichText::new(format!("Pinned by {}", msg.pinned_by.as_deref().unwrap_or("unknown")))
-                                        .italics()
-                                        .color(egui::Color32::YELLOW)
+                                    egui::RichText::new(format!(
+                                        "Pinned by {}",
+                                        msg.pinned_by.as_deref().unwrap_or("unknown")
+                                    ))
+                                    .italics()
+                                    .color(egui::Color32::YELLOW),
                                 );
                             });
                         }
@@ -602,18 +649,25 @@ impl GuiApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Mesh Network");
             ui.separator();
-            
+
             ui.horizontal(|ui| {
                 if ui.button("Back").clicked() {
                     self.reset_mode();
                 }
-                if ui.button(if self.network_show_bandwidth { "Show Topology" } else { "Show Bandwidth" }).clicked() {
+                if ui
+                    .button(if self.network_show_bandwidth {
+                        "Show Topology"
+                    } else {
+                        "Show Bandwidth"
+                    })
+                    .clicked()
+                {
                     self.network_show_bandwidth = !self.network_show_bandwidth;
                 }
             });
-            
+
             ui.separator();
-            
+
             if self.network_show_bandwidth {
                 self.draw_bandwidth_panel(ui);
             } else {
@@ -625,16 +679,16 @@ impl GuiApp {
     fn draw_topology_panel(&mut self, ui: &mut egui::Ui) {
         ui.label(egui::RichText::new("Network Topology").strong().size(16.0));
         ui.separator();
-        
+
         ui.label("Discovered Nodes:");
         ui.separator();
-        
+
         egui::ScrollArea::vertical()
             .max_height(400.0)
             .show(ui, |ui| {
                 ui.label("No nodes discovered yet.");
                 ui.separator();
-                
+
                 ui.collapsing("Path Quality Legend", |ui| {
                     ui.label("Excellent: <1% loss, <100ms latency");
                     ui.label("Good: <5% loss, <500ms latency");
@@ -642,7 +696,7 @@ impl GuiApp {
                     ui.label("Poor: <50% loss, <5000ms latency");
                     ui.label("Dead: >50% loss or >5000ms latency");
                 });
-                
+
                 ui.collapsing("Features", |ui| {
                     ui.label("• Node discovery and status tracking");
                     ui.label("• Path quality indicators");
@@ -655,7 +709,7 @@ impl GuiApp {
     fn draw_bandwidth_panel(&mut self, ui: &mut egui::Ui) {
         ui.label(egui::RichText::new("Bandwidth Usage").strong().size(16.0));
         ui.separator();
-        
+
         ui.group(|ui| {
             ui.label("Local Node Statistics:");
             ui.label("Total Sent: 0 B");
@@ -665,7 +719,7 @@ impl GuiApp {
             ui.label("Peak Send Rate: 0 B/s");
             ui.label("Peak Receive Rate: 0 B/s");
         });
-        
+
         ui.separator();
         ui.label("Per-Node Bandwidth:");
         ui.label("No nodes to display.");
@@ -675,11 +729,11 @@ impl GuiApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Node Details");
             ui.separator();
-            
+
             if ui.button("Back").clicked() {
                 self.mode = GuiMode::Network;
             }
-            
+
             ui.separator();
             ui.label("Select a node from the network view to see path details.");
         });

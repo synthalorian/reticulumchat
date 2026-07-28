@@ -93,7 +93,8 @@ impl TuiApp {
         // Set current user for mention detection
         {
             let state_guard = self.state.read().await;
-            self.notification_service.set_current_user(&state_guard.identity.name);
+            self.notification_service
+                .set_current_user(&state_guard.identity.name);
         }
 
         // Main loop
@@ -151,7 +152,7 @@ impl TuiApp {
             if key.kind != KeyEventKind::Press {
                 return Ok(());
             }
-            
+
             match self.mode {
                 TuiMode::Normal => self.handle_normal_input(key).await?,
                 TuiMode::Edit => self.handle_edit_input(key).await?,
@@ -181,7 +182,9 @@ impl TuiApp {
                 if !self.messages.is_empty() {
                     self.mode = TuiMode::Edit;
                     self.selected_message = Some(self.messages.len().saturating_sub(1));
-                    self.editing_message_id = self.selected_message.and_then(|i| self.messages.get(i).map(|m| m.id));
+                    self.editing_message_id = self
+                        .selected_message
+                        .and_then(|i| self.messages.get(i).map(|m| m.id));
                     if let Some(id) = self.editing_message_id {
                         if let Some(msg) = self.messages.iter().find(|m| m.id == id) {
                             self.input = msg.content.clone();
@@ -193,7 +196,9 @@ impl TuiApp {
                 if !self.messages.is_empty() {
                     self.mode = TuiMode::Reply;
                     self.selected_message = Some(self.messages.len().saturating_sub(1));
-                    self.replying_to_id = self.selected_message.and_then(|i| self.messages.get(i).map(|m| m.id));
+                    self.replying_to_id = self
+                        .selected_message
+                        .and_then(|i| self.messages.get(i).map(|m| m.id));
                     self.input.clear();
                 }
             }
@@ -427,7 +432,10 @@ impl TuiApp {
             MessageEvent::QueueUpdated { count } => {
                 let _ = count;
             }
-            MessageEvent::MessageEdited { message_id, new_content } => {
+            MessageEvent::MessageEdited {
+                message_id,
+                new_content,
+            } => {
                 if let Some(msg) = self.messages.iter_mut().find(|m| m.id == message_id) {
                     msg.edit(new_content);
                 }
@@ -437,7 +445,10 @@ impl TuiApp {
                     msg.mark_deleted();
                 }
             }
-            MessageEvent::MessagePinned { message_id, pinned_by } => {
+            MessageEvent::MessagePinned {
+                message_id,
+                pinned_by,
+            } => {
                 if let Some(msg) = self.messages.iter_mut().find(|m| m.id == message_id) {
                     msg.pin(pinned_by);
                 }
@@ -449,7 +460,10 @@ impl TuiApp {
                 }
                 self.pinned_messages = self.messages.iter().filter(|m| m.pinned).cloned().collect();
             }
-            MessageEvent::MentionReceived { message, mentioned_user } => {
+            MessageEvent::MentionReceived {
+                message,
+                mentioned_user,
+            } => {
                 let _ = mentioned_user;
                 // Only notify if not already notified by MessageReceived
                 if !self.messages.iter().any(|m| m.id == message.id) {
@@ -488,7 +502,8 @@ impl TuiApp {
             state.identity.name.clone(),
             self.contacts[self.selected_contact].clone(),
             content,
-        ).with_parent(parent_id);
+        )
+        .with_parent(parent_id);
         drop(state);
 
         self.messages.push(msg.clone());
@@ -525,7 +540,8 @@ impl TuiApp {
 
     fn perform_search(&mut self) {
         let query = self.search_query.to_lowercase();
-        self.search_results = self.messages
+        self.search_results = self
+            .messages
             .iter()
             .enumerate()
             .filter(|(_, m)| !m.deleted && m.content.to_lowercase().contains(&query))
@@ -577,9 +593,7 @@ impl TuiApp {
             .split(frame.area());
 
         // Contacts sidebar
-        let contacts_block = Block::default()
-            .title("Contacts")
-            .borders(Borders::ALL);
+        let contacts_block = Block::default().title("Contacts").borders(Borders::ALL);
         let contacts: Vec<ListItem> = self
             .contacts
             .iter()
@@ -608,16 +622,19 @@ impl TuiApp {
         // Pinned messages indicator
         let pinned_count = self.messages.iter().filter(|m| m.pinned).count();
         let title = if pinned_count > 0 {
-            format!("Chat - {} ({} pinned, Ctrl+V to view | Ctrl+Q to quit)", 
-                self.contacts[self.selected_contact], pinned_count)
+            format!(
+                "Chat - {} ({} pinned, Ctrl+V to view | Ctrl+Q to quit)",
+                self.contacts[self.selected_contact], pinned_count
+            )
         } else {
-            format!("Chat - {} (Ctrl+Q to quit)", self.contacts[self.selected_contact])
+            format!(
+                "Chat - {} (Ctrl+Q to quit)",
+                self.contacts[self.selected_contact]
+            )
         };
 
         // Messages
-        let messages_block = Block::default()
-            .title(title)
-            .borders(Borders::ALL);
+        let messages_block = Block::default().title(title).borders(Borders::ALL);
         let messages_text = Text::from(
             self.messages
                 .iter()
@@ -637,12 +654,10 @@ impl TuiApp {
     }
 
     fn format_message_line<'a>(&self, msg: &'a Message, _index: usize) -> Line<'a> {
-        let mut spans = vec![
-            Span::styled(
-                format!("[{}] ", msg.timestamp.format("%H:%M")),
-                Style::default().fg(Color::Gray),
-            ),
-        ];
+        let mut spans = vec![Span::styled(
+            format!("[{}] ", msg.timestamp.format("%H:%M")),
+            Style::default().fg(Color::Gray),
+        )];
 
         if msg.pinned {
             spans.push(Span::styled("📌 ", Style::default().fg(Color::Yellow)));
@@ -651,7 +666,9 @@ impl TuiApp {
         if msg.deleted {
             spans.push(Span::styled(
                 "[deleted]".to_string(),
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
             ));
         } else {
             spans.push(Span::styled(
@@ -662,10 +679,7 @@ impl TuiApp {
             ));
 
             if msg.parent_id.is_some() {
-                spans.push(Span::styled(
-                    "↳ ",
-                    Style::default().fg(Color::Magenta),
-                ));
+                spans.push(Span::styled("↳ ", Style::default().fg(Color::Magenta)));
             }
 
             spans.push(Span::raw(&msg.content));
@@ -673,7 +687,9 @@ impl TuiApp {
             if msg.edited_at.is_some() {
                 spans.push(Span::styled(
                     " (edited)",
-                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
                 ));
             }
         }
@@ -716,7 +732,7 @@ impl TuiApp {
         let results_block = Block::default()
             .title(format!("Results: {} matches", self.search_results.len()))
             .borders(Borders::ALL);
-        
+
         let results_text = if self.search_results.is_empty() && !self.search_query.is_empty() {
             Text::from("No results found.")
         } else {
@@ -732,10 +748,17 @@ impl TuiApp {
                                 Style::default()
                             };
                             Line::from(vec![
-                                Span::styled(format!("[{}] ", msg.timestamp.format("%Y-%m-%d %H:%M")), Style::default().fg(Color::Gray)),
-                                Span::styled(format!("{}: ", msg.sender), Style::default().fg(Color::Cyan)),
+                                Span::styled(
+                                    format!("[{}] ", msg.timestamp.format("%Y-%m-%d %H:%M")),
+                                    Style::default().fg(Color::Gray),
+                                ),
+                                Span::styled(
+                                    format!("{}: ", msg.sender),
+                                    Style::default().fg(Color::Cyan),
+                                ),
                                 Span::raw(&msg.content),
-                            ]).style(style)
+                            ])
+                            .style(style)
                         } else {
                             Line::from("")
                         }
@@ -750,11 +773,11 @@ impl TuiApp {
     fn draw_thread(&self, frame: &mut ratatui::Frame) {
         let area = frame.area();
         let thread_messages = self.get_thread_messages();
-        
+
         let block = Block::default()
             .title("Thread View (Esc/Q=Back)")
             .borders(Borders::ALL);
-        
+
         let text = Text::from(
             thread_messages
                 .iter()
@@ -775,11 +798,11 @@ impl TuiApp {
 
     fn draw_pinned(&self, frame: &mut ratatui::Frame) {
         let area = frame.area();
-        
+
         let block = Block::default()
             .title("Pinned Messages (Esc/Q=Back)")
             .borders(Borders::ALL);
-        
+
         let text = if self.pinned_messages.is_empty() {
             Text::from("No pinned messages.")
         } else {
@@ -794,11 +817,24 @@ impl TuiApp {
                             Style::default()
                         };
                         Line::from(vec![
-                            Span::styled(format!("[{}] ", m.timestamp.format("%Y-%m-%d %H:%M")), Style::default().fg(Color::Gray)),
-                            Span::styled(format!("{}: ", m.sender), Style::default().fg(Color::Cyan)),
+                            Span::styled(
+                                format!("[{}] ", m.timestamp.format("%Y-%m-%d %H:%M")),
+                                Style::default().fg(Color::Gray),
+                            ),
+                            Span::styled(
+                                format!("{}: ", m.sender),
+                                Style::default().fg(Color::Cyan),
+                            ),
                             Span::raw(&m.content),
-                            Span::styled(format!(" (pinned by {})", m.pinned_by.as_deref().unwrap_or("unknown")), Style::default().fg(Color::Yellow)),
-                        ]).style(style)
+                            Span::styled(
+                                format!(
+                                    " (pinned by {})",
+                                    m.pinned_by.as_deref().unwrap_or("unknown")
+                                ),
+                                Style::default().fg(Color::Yellow),
+                            ),
+                        ])
+                        .style(style)
                     })
                     .collect::<Vec<_>>(),
             )
@@ -890,11 +926,15 @@ impl TuiApp {
             self.draw_topology_content()
         };
 
-        let paragraph = Paragraph::new(content).block(content_block).wrap(Wrap { trim: true });
+        let paragraph = Paragraph::new(content)
+            .block(content_block)
+            .wrap(Wrap { trim: true });
         frame.render_widget(paragraph, chunks[0]);
 
         let status_text = self.get_network_status_text();
-        let status_block = Block::default().title("Network Status").borders(Borders::ALL);
+        let status_block = Block::default()
+            .title("Network Status")
+            .borders(Borders::ALL);
         let status_para = Paragraph::new(status_text).block(status_block);
         frame.render_widget(status_para, chunks[1]);
     }
@@ -902,55 +942,72 @@ impl TuiApp {
     fn draw_topology_content(&self) -> Text<'_> {
         let mut lines: Vec<Line> = Vec::new();
 
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{:<20} {:<10} {:<12} {:<10} {:<15} {:<10}", "Node", "Status", "Paths", "Best Lat", "Quality", "Redundant"),
-                Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan),
+        lines.push(Line::from(vec![Span::styled(
+            format!(
+                "{:<20} {:<10} {:<12} {:<10} {:<15} {:<10}",
+                "Node", "Status", "Paths", "Best Lat", "Quality", "Redundant"
             ),
-        ]));
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        )]));
         lines.push(Line::from("─".repeat(80)));
 
         lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled("Mesh Network Visualization", Style::default().add_modifier(Modifier::BOLD)),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "Mesh Network Visualization",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]));
         lines.push(Line::from(""));
-        lines.push(Line::from("This view shows discovered nodes in the mesh network."));
+        lines.push(Line::from(
+            "This view shows discovered nodes in the mesh network.",
+        ));
         lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled("Features:", Style::default().add_modifier(Modifier::BOLD).fg(Color::Yellow)),
-        ]));
-        lines.push(Line::from("• Node discovery and status tracking (Online/Degraded/Offline)"));
-        lines.push(Line::from("• Path quality indicators (Excellent/Good/Fair/Poor/Dead)"));
+        lines.push(Line::from(vec![Span::styled(
+            "Features:",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Yellow),
+        )]));
+        lines.push(Line::from(
+            "• Node discovery and status tracking (Online/Degraded/Offline)",
+        ));
+        lines.push(Line::from(
+            "• Path quality indicators (Excellent/Good/Fair/Poor/Dead)",
+        ));
         lines.push(Line::from("• Automatic path redundancy maintenance"));
         lines.push(Line::from("• Bandwidth usage statistics per node"));
         lines.push(Line::from(""));
-        lines.push(Line::from("Use 'B' to toggle bandwidth view, Enter to see node details."));
+        lines.push(Line::from(
+            "Use 'B' to toggle bandwidth view, Enter to see node details.",
+        ));
 
         Text::from(lines)
     }
 
     fn draw_bandwidth_content(&self) -> Text<'_> {
-        let mut lines: Vec<Line> = Vec::new();
-
-        lines.push(Line::from(vec![
-            Span::styled("Bandwidth Usage Statistics", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan)),
-        ]));
-        lines.push(Line::from(""));
-        lines.push(Line::from("Local node bandwidth tracking:"));
-        lines.push(Line::from("• Tracks bytes sent/received over time"));
-        lines.push(Line::from("• Current send/receive rates (5-second average)"));
-        lines.push(Line::from("• Peak rate tracking"));
-        lines.push(Line::from("• Per-node bandwidth accounting"));
-        lines.push(Line::from(""));
-        lines.push(Line::from("Statistics are updated in real-time as packets flow through the mesh."));
+        let lines: Vec<Line> = vec![
+            Line::from(vec![Span::styled(
+                "Bandwidth Usage Statistics",
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .fg(Color::Cyan),
+            )]),
+            Line::from(""),
+            Line::from("Local node bandwidth tracking:"),
+            Line::from("• Tracks bytes sent/received over time"),
+            Line::from("• Current send/receive rates (5-second average)"),
+            Line::from("• Peak rate tracking"),
+            Line::from("• Per-node bandwidth accounting"),
+            Line::from(""),
+            Line::from("Statistics are updated in real-time as packets flow through the mesh."),
+        ];
 
         Text::from(lines)
     }
 
     fn get_network_status_text(&self) -> Text<'_> {
-        let mut lines: Vec<Line> = Vec::new();
-        lines.push(Line::from(vec![
+        let lines: Vec<Line> = vec![Line::from(vec![
             Span::styled("Network: ", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw("v0.6.0 mesh features active | "),
             Span::styled("Nodes: ", Style::default().fg(Color::Yellow)),
@@ -959,7 +1016,7 @@ impl TuiApp {
             Span::raw("0 active | "),
             Span::styled("Redundancy: ", Style::default().fg(Color::Yellow)),
             Span::raw("auto"),
-        ]));
+        ])];
         Text::from(lines)
     }
 
@@ -969,23 +1026,30 @@ impl TuiApp {
             .title("Node Details (Esc/Q=Back)")
             .borders(Borders::ALL);
 
-        let mut lines: Vec<Line> = Vec::new();
-        lines.push(Line::from(vec![
-            Span::styled("Node Path Details", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan)),
-        ]));
-        lines.push(Line::from(""));
-        lines.push(Line::from("Shows individual path metrics for the selected node."));
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled("Path Quality Indicators:", Style::default().add_modifier(Modifier::BOLD)),
-        ]));
-        lines.push(Line::from("• Excellent: <1% loss, <100ms latency"));
-        lines.push(Line::from("• Good: <5% loss, <500ms latency"));
-        lines.push(Line::from("• Fair: <20% loss, <2000ms latency"));
-        lines.push(Line::from("• Poor: <50% loss, <5000ms latency"));
-        lines.push(Line::from("• Dead: >50% loss or >5000ms latency"));
+        let lines: Vec<Line> = vec![
+            Line::from(vec![Span::styled(
+                "Node Path Details",
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .fg(Color::Cyan),
+            )]),
+            Line::from(""),
+            Line::from("Shows individual path metrics for the selected node."),
+            Line::from(""),
+            Line::from(vec![Span::styled(
+                "Path Quality Indicators:",
+                Style::default().add_modifier(Modifier::BOLD),
+            )]),
+            Line::from("• Excellent: <1% loss, <100ms latency"),
+            Line::from("• Good: <5% loss, <500ms latency"),
+            Line::from("• Fair: <20% loss, <2000ms latency"),
+            Line::from("• Poor: <50% loss, <5000ms latency"),
+            Line::from("• Dead: >50% loss or >5000ms latency"),
+        ];
 
-        let paragraph = Paragraph::new(Text::from(lines)).block(block).wrap(Wrap { trim: true });
+        let paragraph = Paragraph::new(Text::from(lines))
+            .block(block)
+            .wrap(Wrap { trim: true });
         frame.render_widget(paragraph, area);
     }
 }

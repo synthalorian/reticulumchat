@@ -105,11 +105,14 @@ mod tests {
     async fn test_reticulum_client_connect_disconnect() {
         let mut client = ReticulumClient::new("127.0.0.1", 3742);
         assert!(!client.is_connected());
-        
+
         client.connect().await.expect("connect should succeed");
         assert!(client.is_connected());
-        
-        client.disconnect().await.expect("disconnect should succeed");
+
+        client
+            .disconnect()
+            .await
+            .expect("disconnect should succeed");
         assert!(!client.is_connected());
     }
 
@@ -117,13 +120,19 @@ mod tests {
     async fn test_reticulum_client_announce_stub() {
         let client = ReticulumClient::new("127.0.0.1", 3742);
         let identity = Identity::generate("test").unwrap();
-        client.announce(&identity).await.expect("announce should succeed in stub mode");
+        client
+            .announce(&identity)
+            .await
+            .expect("announce should succeed in stub mode");
     }
 
     #[tokio::test]
     async fn test_reticulum_client_send_packet_stub() {
         let client = ReticulumClient::new("127.0.0.1", 3742);
-        client.send_packet("destination_hash", b"test data").await.expect("send_packet should succeed in stub mode");
+        client
+            .send_packet("destination_hash", b"test data")
+            .await
+            .expect("send_packet should succeed in stub mode");
     }
 
     #[test]
@@ -148,10 +157,8 @@ mod tests {
 
     #[test]
     fn test_destination_builder_pattern() {
-        let dest = Destination::new("abc123")
-            .with_name("Test Node")
-            .trusted();
-        
+        let dest = Destination::new("abc123").with_name("Test Node").trusted();
+
         assert_eq!(dest.hash, "abc123");
         assert_eq!(dest.name, Some("Test Node".to_string()));
         assert!(dest.trusted);

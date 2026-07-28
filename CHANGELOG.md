@@ -5,6 +5,31 @@ All notable changes to ReticulumChat are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-07-28
+
+First stable release. The v0.9.0 release candidate underwent an adversarial audit of the full codebase; all findings were fixed and covered by regression tests.
+
+### Fixed (RC audit)
+
+- **CLI crash on startup:** the `--host` flag's auto-assigned `-h` short collided with clap's built-in help flag, causing a debug-assertion panic on every invocation in debug builds. `--host` now uses `-H`.
+- **Stack overflow on cyclic threads:** `MessageHistory::thread_root` recursed unboundedly when parent links formed a cycle (e.g. a malformed history where a message is its own ancestor). It now walks parents iteratively with cycle detection.
+- **Panic on zero-capacity history:** `MessageHistory::with_capacity(0).add(...)` panicked removing from an empty history; zero-capacity histories now discard messages.
+- **Config migration never reachable:** configs predating the `version` field failed to parse, so `config-migrate` could never migrate them. `Config` now uses serde defaults (missing `version` = v0), and partial configs parse with defaults for missing fields.
+- **`feedback` command hung on EOF:** the interactive stdin loop spun forever after Ctrl+D; it now terminates correctly at EOF.
+- **Identity data loss:** a corrupt/unreadable identity file was silently overwritten by a freshly generated one. The old file is now backed up to `<identity-path>.corrupt.bak` first.
+- **GUI wrong sender name:** the GUI hardcoded the current user as `"user"` instead of the loaded identity's name.
+
+### Added
+
+- 22 new hermetic hardening tests (77 total) covering the regressions above plus config parsing, message serialization, identity handling, crypto robustness on malformed input, and queue edge cases
+- `Default` implementation for `OfflineQueue`
+
+### Changed
+
+- All `cargo clippy --all-targets` and `cargo fmt --check` warnings resolved
+- README corrected: removed keybindings that don't exist (`Tab`, `Page Up/Down`), updated identity-corruption troubleshooting, added a Known Limitations section
+- PLAN.md checkboxes audited against the codebase; deferred items (live Reticulum transport, SQLite persistence, rooms/reactions/file transfer/voice) explicitly marked with post-1.0 notes
+
 ## [0.9.0] - 2025-06-08
 
 ### Release Candidate

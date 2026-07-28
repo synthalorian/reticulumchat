@@ -31,11 +31,11 @@ impl PathQuality {
     /// Get a color code for terminal display (ratatui Color)
     pub fn color(&self) -> u8 {
         match self {
-            PathQuality::Excellent => 2,  // Green
-            PathQuality::Good => 10,      // Light green
-            PathQuality::Fair => 3,       // Yellow
-            PathQuality::Poor => 1,       // Red
-            PathQuality::Dead => 8,       // Gray
+            PathQuality::Excellent => 2, // Green
+            PathQuality::Good => 10,     // Light green
+            PathQuality::Fair => 3,      // Yellow
+            PathQuality::Poor => 1,      // Red
+            PathQuality::Dead => 8,      // Gray
         }
     }
 
@@ -265,7 +265,9 @@ impl MeshNode {
                     return std::cmp::Ordering::Greater;
                 }
                 // Then sort by latency
-                a.latency_ms.partial_cmp(&b.latency_ms).unwrap_or(std::cmp::Ordering::Equal)
+                a.latency_ms
+                    .partial_cmp(&b.latency_ms)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
     }
 
@@ -297,8 +299,15 @@ impl MeshNode {
 
     /// Update node status based on available paths
     fn update_status_from_paths(&mut self) {
-        let active_count = self.paths.iter().filter(|p| p.active && !p.is_stale()).count();
-        let has_preferred = self.paths.iter().any(|p| p.is_preferred && p.active && !p.is_stale());
+        let active_count = self
+            .paths
+            .iter()
+            .filter(|p| p.active && !p.is_stale())
+            .count();
+        let has_preferred = self
+            .paths
+            .iter()
+            .any(|p| p.is_preferred && p.active && !p.is_stale());
 
         self.status = if active_count == 0 {
             NodeStatus::Offline
@@ -520,7 +529,7 @@ impl MeshNetwork {
     pub fn discover_node(&mut self, hash: impl Into<String>) -> &mut MeshNode {
         let hash = hash.into();
         let now = Utc::now();
-        
+
         self.nodes.entry(hash.clone()).or_insert_with(|| {
             let mut node = MeshNode::new(&hash);
             node.first_seen = now;
@@ -546,7 +555,9 @@ impl MeshNetwork {
 
     /// Add a path to a node
     pub fn add_path(&mut self, node_hash: &str, path: NetworkPath) -> Result<()> {
-        let node = self.nodes.get_mut(node_hash)
+        let node = self
+            .nodes
+            .get_mut(node_hash)
             .ok_or_else(|| anyhow::anyhow!("Node not found: {}", node_hash))?;
         node.add_path(path);
         Ok(())
@@ -554,7 +565,9 @@ impl MeshNetwork {
 
     /// Remove a path from a node
     pub fn remove_path(&mut self, node_hash: &str, path_id: Uuid) -> Result<()> {
-        let node = self.nodes.get_mut(node_hash)
+        let node = self
+            .nodes
+            .get_mut(node_hash)
             .ok_or_else(|| anyhow::anyhow!("Node not found: {}", node_hash))?;
         node.remove_path(path_id);
         Ok(())
@@ -603,10 +616,7 @@ impl MeshNetwork {
 
     /// Get the total number of redundant paths
     pub fn total_redundant_paths(&self) -> usize {
-        self.nodes
-            .values()
-            .map(|n| n.redundant_path_count())
-            .sum()
+        self.nodes.values().map(|n| n.redundant_path_count()).sum()
     }
 
     /// Check and maintain path redundancy for all nodes
@@ -620,11 +630,16 @@ impl MeshNetwork {
 
         for hash in node_hashes {
             if let Some(node) = self.nodes.get(&hash) {
-                let active_paths = node.paths.iter().filter(|p| p.active && !p.is_stale()).count();
+                let active_paths = node
+                    .paths
+                    .iter()
+                    .filter(|p| p.active && !p.is_stale())
+                    .count();
                 let has_poor_quality = node.paths.iter().any(|p| {
                     p.active
                         && !p.is_stale()
-                        && quality_ordinal(&p.quality()) >= quality_ordinal(&self.redundancy_threshold)
+                        && quality_ordinal(&p.quality())
+                            >= quality_ordinal(&self.redundancy_threshold)
                 });
 
                 // Need more paths if below minimum or quality is poor
@@ -691,7 +706,10 @@ impl MeshNetwork {
         output.push_str("====================\n\n");
 
         // Local node
-        output.push_str(&format!("[{}] (local)\n", self.local_hash.chars().take(8).collect::<String>()));
+        output.push_str(&format!(
+            "[{}] (local)\n",
+            self.local_hash.chars().take(8).collect::<String>()
+        ));
 
         let nodes = self.sorted_nodes();
         if nodes.is_empty() {
@@ -714,15 +732,17 @@ impl MeshNetwork {
                 let quality_label = best.quality().label();
                 output.push_str(&format!(
                     "[{}ms, {} hops, {}]",
-                    best.latency_ms as u32,
-                    best.hop_count,
-                    quality_label
+                    best.latency_ms as u32, best.hop_count, quality_label
                 ));
             }
             output.push('\n');
 
             // Show redundant paths
-            let redundant = node.paths.iter().filter(|p| p.is_redundant && p.active).count();
+            let redundant = node
+                .paths
+                .iter()
+                .filter(|p| p.is_redundant && p.active)
+                .count();
             if redundant > 0 {
                 output.push_str(&format!("  │     └─ {} redundant path(s)\n", redundant));
             }
@@ -855,34 +875,26 @@ mod tests {
 
     #[test]
     fn test_path_quality_from_metrics() {
-        assert_eq!(
-            PathQuality::from_metrics(10.0, 0.0),
-            PathQuality::Excellent
-        );
-        assert_eq!(
-            PathQuality::from_metrics(50.0, 2.0),
-            PathQuality::Good
-        );
-        assert_eq!(
-            PathQuality::from_metrics(200.0, 10.0),
-            PathQuality::Fair
-        );
-        assert_eq!(
-            PathQuality::from_metrics(5001.0, 0.0),
-            PathQuality::Dead
-        );
+        assert_eq!(PathQuality::from_metrics(10.0, 0.0), PathQuality::Excellent);
+        assert_eq!(PathQuality::from_metrics(50.0, 2.0), PathQuality::Good);
+        assert_eq!(PathQuality::from_metrics(200.0, 10.0), PathQuality::Fair);
+        assert_eq!(PathQuality::from_metrics(5001.0, 0.0), PathQuality::Dead);
     }
 
     #[test]
     fn test_mesh_node_path_management() {
         let mut node = MeshNode::new("test_hash");
-        
-        let path1 = NetworkPath::new("test_hash").with_hops(1).with_latency(50.0);
-        let path2 = NetworkPath::new("test_hash").with_hops(2).with_latency(100.0);
-        
+
+        let path1 = NetworkPath::new("test_hash")
+            .with_hops(1)
+            .with_latency(50.0);
+        let path2 = NetworkPath::new("test_hash")
+            .with_hops(2)
+            .with_latency(100.0);
+
         node.add_path(path1.clone());
         node.add_path(path2.clone());
-        
+
         assert_eq!(node.paths.len(), 2);
         assert_eq!(node.best_path().unwrap().latency_ms, 50.0);
     }
@@ -892,28 +904,31 @@ mod tests {
         let mut stats = BandwidthStats::new();
         stats.record_sent(1000);
         stats.record_received(500);
-        
+
         assert_eq!(stats.bytes_sent, 1000);
         assert_eq!(stats.bytes_received, 500);
         assert_eq!(stats.current_second_sent, 1000);
         assert_eq!(stats.current_second_received, 500);
-        
+
         assert!(stats.send_history.is_empty());
     }
 
     #[test]
     fn test_mesh_network_discovery() {
         let mut network = MeshNetwork::new("local");
-        
+
         {
             let node = network.discover_node("node1");
             node.name = Some("Test Node".to_string());
             node.trusted = true;
         }
-        
+
         assert_eq!(network.nodes.len(), 1);
         assert!(network.get_node("node1").unwrap().trusted);
-        assert_eq!(network.get_node("node1").unwrap().display_name(), "Test Node");
+        assert_eq!(
+            network.get_node("node1").unwrap().display_name(),
+            "Test Node"
+        );
     }
 
     #[test]
@@ -921,13 +936,18 @@ mod tests {
         let mut network = MeshNetwork::new("local");
         network.min_paths = 2;
         network.max_paths = 3;
-        
+
         let node = network.discover_node("node1");
         node.add_path(NetworkPath::new("node1").with_hops(1).with_latency(50.0));
-        node.add_path(NetworkPath::new("node1").with_hops(2).with_latency(100.0).mark_redundant());
-        
+        node.add_path(
+            NetworkPath::new("node1")
+                .with_hops(2)
+                .with_latency(100.0)
+                .mark_redundant(),
+        );
+
         assert_eq!(network.total_redundant_paths(), 1);
-        
+
         network.check_redundancy();
         // Should not remove paths since we're at minimum
         assert_eq!(network.get_node("node1").unwrap().paths.len(), 2);
@@ -943,12 +963,12 @@ mod tests {
     #[test]
     fn test_topology_rebuild() {
         let mut network = MeshNetwork::new("local");
-        
+
         let node = network.discover_node("node1");
         node.add_path(NetworkPath::new("node1").with_hops(1).with_latency(50.0));
-        
+
         network.rebuild_topology();
-        
+
         assert_eq!(network.topology.len(), 1);
         assert_eq!(network.topology[0].to, "node1");
     }
@@ -956,12 +976,12 @@ mod tests {
     #[test]
     fn test_prune_stale() {
         let mut network = MeshNetwork::new("local");
-        
+
         let node = network.discover_node("node1");
         node.last_seen = Utc::now() - Duration::minutes(10); // Stale
-        
+
         network.prune_stale();
-        
+
         assert!(network.get_node("node1").is_none());
     }
 }

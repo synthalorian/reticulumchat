@@ -1,6 +1,8 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
-use reticulumchat::{crash_reporter, identity::Identity, migrate_config, AppRuntime, AppState, Config};
+use reticulumchat::{
+    crash_reporter, identity::Identity, migrate_config, AppRuntime, AppState, Config,
+};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -19,7 +21,7 @@ struct Cli {
     mode: RunMode,
 
     /// Reticulum host address
-    #[arg(short, long, default_value = "127.0.0.1")]
+    #[arg(short = 'H', long, default_value = "127.0.0.1")]
     host: String,
 
     /// Reticulum port
@@ -139,7 +141,33 @@ async fn cmd_run(cli: Cli) -> Result<()> {
             id
         }
         Err(e) => {
-            tracing::warn!("Failed to load identity ({}), generating new one", e);
+            // If an identity file exists but is corrupt/unreadable, back it
+            // up before generating a new one so the old key is not silently
+            // destroyed.
+            let expanded = shellexpand::tilde(&cli.identity);
+            let identity_path = PathBuf::from(expanded.as_ref());
+            if identity_path.exists() {
+                let backup_path = identity_path.with_extension("corrupt.bak");
+                match tokio::fs::copy(&identity_path, &backup_path).await {
+                    Ok(_) => tracing::warn!(
+                        "Identity file at {} was unreadable ({}); backed up to {}",
+                        identity_path.display(),
+                        e,
+                        backup_path.display()
+                    ),
+                    Err(copy_err) => tracing::warn!(
+                        "Identity file at {} was unreadable ({}) and backup failed: {}",
+                        identity_path.display(),
+                        e,
+                        copy_err
+                    ),
+                }
+            } else {
+                tracing::info!(
+                    "No identity found at {}, generating new one",
+                    identity_path.display()
+                );
+            }
             let id = Identity::generate(&cli.name)?;
             if let Err(e) = save_identity(&cli.identity, &id).await {
                 tracing::warn!("Failed to save identity: {}", e);
@@ -221,8 +249,14 @@ async fn cmd_config_migrate(config_path: &str, backup: bool) -> Result<()> {
     let (config, result) = migrate_config(config)?;
 
     if result.is_noop() {
-        tracing::info!("Configuration is already up to date (v{})", result.to_version);
-        println!("Configuration is already up to date (v{})", result.to_version);
+        tracing::info!(
+            "Configuration is already up to date (v{})",
+            result.to_version
+        );
+        println!(
+            "Configuration is already up to date (v{})",
+            result.to_version
+        );
         return Ok(());
     }
 
@@ -270,8 +304,14 @@ async fn cmd_feedback(
         None => {
             println!("Please enter your feedback (press Ctrl+D when done):");
             let mut input = String::new();
-            while std::io::stdin().read_line(&mut input).is_ok() {
-                // Read until EOF
+            loop {
+                // read_line returns Ok(0) at EOF; without this check the
+                // loop spins forever on Ctrl+D.
+                match std::io::stdin().read_line(&mut input) {
+                    Ok(0) => break, // EOF
+                    Ok(_) => continue,
+                    Err(_) => break,
+                }
             }
             input.trim().to_string()
         }
@@ -334,7 +374,10 @@ async fn cmd_feedback(
     }
 
     println!("\nThank you for your feedback!");
-    println!("Your feedback has been saved to: {}", feedback_path.display());
+    println!(
+        "Your feedback has been saved to: {}",
+        feedback_path.display()
+    );
     println!("Please submit this file at: https://github.com/reticulumchat/reticulumchat/issues");
 
     Ok(())

@@ -13,14 +13,21 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Application configuration shared across modes
+///
+/// Missing fields fall back to defaults so that older or partial config
+/// files still parse. A missing `version` field defaults to 0, which lets
+/// the migration system recognize pre-versioned (v0) config files.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     pub identity_path: String,
     pub reticulum_host: String,
     pub reticulum_port: u16,
     pub enable_notifications: bool,
     pub enable_encryption: bool,
-    /// Configuration format version for migration tracking
+    /// Configuration format version for migration tracking.
+    /// Defaults to 0 (pre-versioned) when absent so migration can run.
+    #[serde(default)]
     pub version: u32,
 }
 

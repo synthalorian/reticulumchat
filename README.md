@@ -3,7 +3,7 @@
 [![CI](https://github.com/reticulumchat/reticulumchat/actions/workflows/ci.yml/badge.svg)](https://github.com/reticulumchat/reticulumchat/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust Version](https://img.shields.io/badge/rust-1.82%2B-blue.svg)](https://www.rust-lang.org)
-[![Version](https://img.shields.io/badge/version-0.9.0-green.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](./CHANGELOG.md)
 
 A chat client for the [Reticulum](https://reticulum.network/) mesh network, built in Rust with support for both terminal (TUI) and graphical (GUI) interfaces.
 
@@ -146,8 +146,6 @@ RUST_LOG=reticulumchat::network=trace reticulumchat
 | `Ctrl+V` | View pinned messages |
 | `Ctrl+N` | Network view |
 | `Up/Down` | Navigate contacts |
-| `Tab` | Switch focus between panels |
-| `Page Up/Down` | Scroll message history |
 
 ## Configuration
 
@@ -210,7 +208,7 @@ reticulumchat/
 │   ├── messaging.rs     # Messages, history, offline queue, delivery confirmations
 │   ├── network.rs       # Mesh network, paths, bandwidth stats, topology
 │   ├── notification.rs  # Desktop notifications via notify-rust
-│   ├── reticulum.rs     # Reticulum protocol client (TCP/Unix socket)
+│   ├── reticulum.rs     # Reticulum client (stub; live transport planned post-1.0)
 │   ├── crash_reporter.rs # Panic hook and crash reporting
 │   ├── tui/             # Terminal UI implementation (ratatui)
 │   └── gui/             # Graphical UI implementation (egui/eframe)
@@ -276,7 +274,7 @@ Ensure your Reticulum instance is running and accessible at the host/port specif
 
 ### Identity file issues
 
-If your identity file becomes corrupted, delete `~/.reticulumchat/identity` and restart. A new identity will be generated automatically.
+If your identity file becomes corrupted, ReticulumChat automatically backs it up to `<identity-path>.corrupt.bak` and generates a fresh identity, so the old key material is never silently destroyed.
 
 ### Config migration errors
 
@@ -285,16 +283,17 @@ If you encounter config parsing errors after upgrading, run:
 reticulumchat config-migrate --config ~/.reticulumchat/config.json
 ```
 
+## Known Limitations (v1.0.0)
+
+- The Reticulum transport (`ReticulumClient`) is currently a stub: the full messaging, encryption, and mesh data models are implemented and tested, but packets are not yet sent over a live RNS instance. Wiring the transport is the first post-1.0 priority (see [PLAN.md](PLAN.md)).
+- Message history and the offline queue are in-memory; on-disk persistence (SQLite) is planned post-1.0.
+- Rooms, reactions, file transfer, and voice messages are deferred (see [PLAN.md](PLAN.md)).
+
 ## Roadmap
 
 See [PLAN.md](PLAN.md) for the full development roadmap.
 
-Current version: **v0.9.0** — Release candidate
-
-- [x] Final API freeze
-- [x] Documentation complete
-- [x] Demo mesh network setup
-- [x] Release notes draft
+Current version: **v1.0.0** — First stable release
 
 ## Changelog
 
