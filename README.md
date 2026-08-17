@@ -319,3 +319,11 @@ Contributions are welcome! Please feel free to submit a Pull Request. For major 
 - [ratatui](https://ratatui.rs/) — Terminal UI framework
 - [egui](https://www.egui.rs/) — Immediate mode GUI framework
 - [age](https://age-encryption.org/) — Simple file encryption tool
+
+---
+
+## ☕ Support the Developer
+
+If this project saved you time, solved a problem, or just made your day a little more neon, you can fuel the next one:
+
+[![Buy Me A Coffee](https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png)](https://buymeacoffee.com/synthalorian)
